@@ -1,0 +1,1896 @@
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local CoreGui = game:GetService("CoreGui")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+-- Settings
+local OPEN_CLOSE_BIND = Enum.KeyCode.Insert
+local currentBind = OPEN_CLOSE_BIND
+local currentThemeColor = Color3.fromRGB(0, 100, 255)
+local currentTransparency = 0.4
+
+-- Animation Module
+local AnimationModule = {
+    Settings = {
+        CurrentBind = Enum.KeyCode.V,
+        CurrentAnimation = "rbxassetid://507771019",
+        IsEnabled = true
+    }
+}
+
+-- Animation variables
+local isAnimating = false
+local animationTrack = nil
+local canPlayAnimation = true
+local animation
+local character, humanoid
+
+-- Initialize character for animations
+local function initializeCharacter()
+    character = player.Character or player.CharacterAdded:Wait()
+    humanoid = character:WaitForChild("Humanoid")
+    
+    animation = Instance.new("Animation")
+    animation.AnimationId = AnimationModule.Settings.CurrentAnimation
+end
+
+-- Animation functions
+local function playAnimation()
+    if not canPlayAnimation or not AnimationModule.Settings.IsEnabled then return end
+    
+    canPlayAnimation = false
+    
+    if animationTrack then
+        animationTrack:Stop()
+    end
+    
+    if animation.AnimationId ~= AnimationModule.Settings.CurrentAnimation then
+        animation.AnimationId = AnimationModule.Settings.CurrentAnimation
+    end
+    
+    animationTrack = humanoid:LoadAnimation(animation)
+    animationTrack.Priority = Enum.AnimationPriority.Action
+    
+    animationTrack.Stopped:Connect(function()
+        canPlayAnimation = true
+        animationTrack = nil
+    end)
+    
+    animationTrack:Play()
+    return animationTrack
+end
+
+local function stopAnimation()
+    if animationTrack then
+        animationTrack:Stop()
+        animationTrack = nil
+    end
+    canPlayAnimation = true
+end
+
+local function startAnimationLoop()
+    if not isAnimating then
+        isAnimating = true
+        coroutine.wrap(function()
+            while isAnimating and character and humanoid and AnimationModule.Settings.IsEnabled do
+                local track = playAnimation()
+                if track then
+                    track.Ended:Wait()
+                else
+                    wait(2)
+                end
+            end
+        end)()
+    end
+end
+
+function AnimationModule.ToggleAnimation()
+    if not isAnimating then
+        startAnimationLoop()
+        return true
+    else
+        isAnimating = false
+        stopAnimation()
+        return false
+    end
+end
+
+function AnimationModule.SetBind(newKeyCode)
+    AnimationModule.Settings.CurrentBind = newKeyCode
+end
+
+function AnimationModule.SetAnimation(animationId)
+    AnimationModule.Settings.CurrentAnimation = "rbxassetid://" .. tostring(animationId)
+    if isAnimating then
+        stopAnimation()
+        wait(0.1)
+        playAnimation()
+    end
+end
+
+function AnimationModule.SetEnabled(enabled)
+    AnimationModule.Settings.IsEnabled = enabled
+    if not enabled and isAnimating then
+        isAnimating = false
+        stopAnimation()
+    end
+end
+
+-- Initialize animations
+if player.Character then
+    initializeCharacter()
+end
+
+-- Character respawn handler
+player.CharacterAdded:Connect(function(newCharacter)
+    character = newCharacter
+    humanoid = character:WaitForChild("Humanoid")
+    
+    if isAnimating then
+        wait(1)
+        if isAnimating then
+            startAnimationLoop()
+        end
+    end
+end)
+
+-- Animation bind handler
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed or not AnimationModule.Settings.IsEnabled then return end
+    
+    if input.KeyCode == AnimationModule.Settings.CurrentBind then
+        AnimationModule.ToggleAnimation()
+    end
+end)
+
+-- ESP Module
+local ESPModule = {
+    Enabled = false,
+    Config = {
+        UPDATE_INTERVAL_ALIVE = 0.1,
+        UPDATE_INTERVAL_DEAD = 2,
+        MAX_DISTANCE = 500,
+        COLORS = {
+            ALIVE = {
+                PRIMARY = Color3.fromRGB(0, 150, 255),
+                SECONDARY = Color3.fromRGB(0, 100, 200),
+                ACCENT = Color3.fromRGB(100, 200, 255)
+            },
+            DEAD = {
+                PRIMARY = Color3.fromRGB(150, 150, 150),
+                SECONDARY = Color3.fromRGB(100, 100, 100),
+                ACCENT = Color3.fromRGB(200, 200, 200)
+            }
+        },
+        PULSE_SPEED = 3,
+        CIRCLE_SPEED = 2,
+        TRANSPARENCY = 0.85,
+        SHOW_HP = true,
+        SHOW_NAME = true,
+        SHOW_DISTANCE = true,
+        TEXT_SIZE = 14,
+        TEXT_COLOR = Color3.fromRGB(255, 255, 255),
+        BOX_COLOR = Color3.fromRGB(0, 150, 255)
+    }
+}
+
+-- ESP variables
+local espPlayerData = {}
+local espCache = {}
+local espEnabled = false
+local espUpdateConnection = nil
+local playerAddedConnection = nil
+local playerRemovingConnection = nil
+
+-- ESP Functions
+local function checkPlayerState(player)
+    if not player or not player.Parent then return false end
+    local character = player.Character
+    if not character then return false end
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if not humanoid then return false end
+    return humanoid.Health > 0
+end
+
+local function createBodyPart(partType, size, color)
+    local part
+    if partType == "head" then
+        part = Instance.new("SphereHandleAdornment")
+        part.Radius = size / 2
+    else
+        part = Instance.new("BoxHandleAdornment")
+        part.Size = size
+    end
+    part.Name = "ESPPart"
+    part.AlwaysOnTop = true
+    part.ZIndex = 2
+    part.Transparency = ESPModule.Config.TRANSPARENCY
+    part.Color3 = color
+    return part
+end
+
+local function createCircleEffect()
+    local circle = Instance.new("SphereHandleAdornment")
+    circle.Name = "ESPCircle"
+    circle.AlwaysOnTop = false
+    circle.ZIndex = 1
+    circle.Radius = 0.8
+    circle.Transparency = 0.7
+    circle.Color3 = ESPModule.Config.COLORS.ALIVE.ACCENT
+    return circle
+end
+
+local function cleanUpESP(player)
+    if espCache[player] then
+        for _, element in pairs(espCache[player].elements) do
+            if element and element.Parent then
+                if type(element) == "table" then
+                    for _, subElement in pairs(element) do
+                        if subElement and subElement.Parent then
+                            subElement:Destroy()
+                        end
+                    end
+                else
+                    element:Destroy()
+                end
+            end
+        end
+        espCache[player] = nil
+    end
+    if espPlayerData[player] then
+        for _, connection in pairs(espPlayerData[player].connections) do
+            if connection then
+                connection:Disconnect()
+            end
+        end
+        espPlayerData[player] = nil
+    end
+end
+
+local function createBodyESP(player)
+    -- Clean up existing ESP first
+    cleanUpESP(player)
+    
+    local esp = {
+        elements = {},
+        lastUpdate = 0,
+        isAlive = true,
+        pulseTime = 0,
+        circleTime = 0
+    }
+    
+    local bodyParts = {}
+    
+    -- Голова
+    local head = createBodyPart("head", 2, ESPModule.Config.BOX_COLOR)
+    table.insert(bodyParts, head)
+    
+    -- Торс
+    local torso = createBodyPart("box", Vector3.new(2, 3, 1), ESPModule.Config.BOX_COLOR)
+    table.insert(bodyParts, torso)
+    
+    -- Руки
+    local leftArm = createBodyPart("box", Vector3.new(1, 2.5, 1), ESPModule.Config.BOX_COLOR)
+    local rightArm = createBodyPart("box", Vector3.new(1, 2.5, 1), ESPModule.Config.BOX_COLOR)
+    table.insert(bodyParts, leftArm)
+    table.insert(bodyParts, rightArm)
+    
+    -- Ноги
+    local leftLeg = createBodyPart("box", Vector3.new(1, 2.5, 1), ESPModule.Config.BOX_COLOR)
+    local rightLeg = createBodyPart("box", Vector3.new(1, 2.5, 1), ESPModule.Config.BOX_COLOR)
+    table.insert(bodyParts, leftLeg)
+    table.insert(bodyParts, rightLeg)
+    
+    -- Круги вокруг тела
+    local circles = {}
+    for i = 1, 4 do
+        local circle = createCircleEffect()
+        table.insert(circles, circle)
+    end
+    
+    -- Текст
+    local billboard = Instance.new("BillboardGui")
+    billboard.Name = "ESPBillboard"
+    billboard.Size = UDim2.new(0, 200, 0, 80)
+    billboard.StudsOffset = Vector3.new(0, 5, 0)
+    billboard.AlwaysOnTop = true
+    billboard.MaxDistance = ESPModule.Config.MAX_DISTANCE
+    
+    local textLabel = Instance.new("TextLabel")
+    textLabel.Name = "ESPText"
+    textLabel.Size = UDim2.new(1, 0, 1, 0)
+    textLabel.BackgroundTransparency = 1
+    textLabel.Text = ""
+    textLabel.TextColor3 = ESPModule.Config.TEXT_COLOR
+    textLabel.TextStrokeColor3 = ESPModule.Config.BOX_COLOR
+    textLabel.TextStrokeTransparency = 0.3
+    textLabel.TextSize = ESPModule.Config.TEXT_SIZE
+    textLabel.Font = Enum.Font.GothamBold
+    textLabel.TextYAlignment = Enum.TextYAlignment.Top
+    textLabel.Parent = billboard
+    
+    -- Трассер
+    local tracer = Instance.new("Beam")
+    tracer.Name = "ESPTracer"
+    tracer.Width0 = 0.05
+    tracer.Width1 = 0.05
+    tracer.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, ESPModule.Config.BOX_COLOR),
+        ColorSequenceKeypoint.new(1, ESPModule.Config.COLORS.ALIVE.SECONDARY)
+    })
+    tracer.Transparency = NumberSequence.new(0.7)
+    
+    local attachment0 = Instance.new("Attachment")
+    local attachment1 = Instance.new("Attachment")
+    
+    tracer.Attachment0 = attachment0
+    tracer.Attachment1 = attachment1
+    
+    esp.elements = {
+        bodyParts = bodyParts,
+        circles = circles,
+        billboard = billboard,
+        textLabel = textLabel,
+        tracer = tracer,
+        attachment0 = attachment0,
+        attachment1 = attachment1
+    }
+    
+    local coreGui = game:GetService("CoreGui")
+    for _, part in pairs(bodyParts) do
+        part.Parent = coreGui
+    end
+    for _, circle in pairs(circles) do
+        circle.Parent = coreGui
+    end
+    billboard.Parent = coreGui
+    
+    espCache[player] = esp
+    return esp
+end
+
+local function updateBodyParts(esp, character)
+    local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+    if not humanoidRootPart then return end
+    
+    local headPart = character:FindFirstChild("Head")
+    local torsoPart = character:FindFirstChild("UpperTorso") or character:FindFirstChild("Torso")
+    local leftArmPart = character:FindFirstChild("LeftUpperArm") or character:FindFirstChild("Left Arm")
+    local rightArmPart = character:FindFirstChild("RightUpperArm") or character:FindFirstChild("Right Arm")
+    local leftLegPart = character:FindFirstChild("LeftUpperLeg") or character:FindFirstChild("Left Leg")
+    local rightLegPart = character:FindFirstChild("RightUpperLeg") or character:FindFirstChild("Right Leg")
+    
+    if esp.elements.bodyParts[1] and headPart then
+        esp.elements.bodyParts[1].Adornee = headPart
+    end
+    if esp.elements.bodyParts[2] and torsoPart then
+        esp.elements.bodyParts[2].Adornee = torsoPart
+    end
+    if esp.elements.bodyParts[3] and leftArmPart then
+        esp.elements.bodyParts[3].Adornee = leftArmPart
+    end
+    if esp.elements.bodyParts[4] and rightArmPart then
+        esp.elements.bodyParts[4].Adornee = rightArmPart
+    end
+    if esp.elements.bodyParts[5] and leftLegPart then
+        esp.elements.bodyParts[5].Adornee = leftLegPart
+    end
+    if esp.elements.bodyParts[6] and rightLegPart then
+        esp.elements.bodyParts[6].Adornee = rightLegPart
+    end
+end
+
+local function updateCircleEffect(esp, dt, character)
+    esp.circleTime = esp.circleTime + dt * ESPModule.Config.CIRCLE_SPEED
+    
+    local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+    if not humanoidRootPart then return end
+    
+    local positions = {
+        humanoidRootPart.Position + Vector3.new(2, 0, 0),
+        humanoidRootPart.Position + Vector3.new(-2, 0, 0),
+        humanoidRootPart.Position + Vector3.new(0, 2, 0),
+        humanoidRootPart.Position + Vector3.new(0, -1, 0)
+    }
+    
+    for i, circle in ipairs(esp.elements.circles) do
+        local pulse = (math.sin(esp.circleTime + i * 0.5) + 1) * 0.5
+        circle.Transparency = 0.6 + (pulse * 0.3)
+        circle.Radius = 0.6 + pulse * 0.4
+        circle.Adornee = nil
+        circle.CFrame = CFrame.new(positions[i])
+    end
+end
+
+local function updatePulseEffect(esp, dt)
+    esp.pulseTime = esp.pulseTime + dt * ESPModule.Config.PULSE_SPEED
+    
+    local pulse = (math.sin(esp.pulseTime) + 1) * 0.5
+    
+    for _, part in ipairs(esp.elements.bodyParts) do
+        if part then
+            part.Transparency = ESPModule.Config.TRANSPARENCY - pulse * 0.2
+        end
+    end
+end
+
+local function getDistanceColor(distance)
+    local maxDist = ESPModule.Config.MAX_DISTANCE
+    local ratio = math.clamp(distance / maxDist, 0, 1)
+    
+    local r = 0
+    local g = 100 + (1 - ratio) * 155
+    local b = 150 + (1 - ratio) * 105
+    
+    return Color3.fromRGB(r, g, b)
+end
+
+local function updateESPDisplay(player, esp, distance, isAlive)
+    local character = player.Character
+    if not character then return end
+    
+    local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+    if not humanoidRootPart then return end
+    
+    updateBodyParts(esp, character)
+    
+    esp.elements.billboard.Adornee = humanoidRootPart
+    
+    local primaryColor, accentColor
+    if isAlive then
+        primaryColor = getDistanceColor(distance)
+        accentColor = ESPModule.Config.COLORS.ALIVE.ACCENT
+    else
+        primaryColor = ESPModule.Config.COLORS.DEAD.PRIMARY
+        accentColor = ESPModule.Config.COLORS.DEAD.ACCENT
+    end
+    
+    -- Apply box color
+    for i, part in ipairs(esp.elements.bodyParts) do
+        if part then
+            part.Color3 = ESPModule.Config.BOX_COLOR
+        end
+    end
+    
+    for _, circle in ipairs(esp.elements.circles) do
+        circle.Color3 = accentColor
+    end
+    
+    esp.elements.tracer.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, ESPModule.Config.BOX_COLOR),
+        ColorSequenceKeypoint.new(1, accentColor)
+    })
+    
+    -- Update text based on settings
+    local textParts = {}
+    
+    -- Status (always shown)
+    local status = isAlive and "🔵 ALIVE" or "⚪ DEAD"
+    table.insert(textParts, status)
+    
+    -- Name
+    if ESPModule.Config.SHOW_NAME then
+        table.insert(textParts, "👤 " .. player.Name)
+    end
+    
+    -- Health
+    if ESPModule.Config.SHOW_HP and isAlive then
+        local humanoid = character:FindFirstChildOfClass("Humanoid")
+        if humanoid then
+            local healthPercent = math.floor((humanoid.Health / humanoid.MaxHealth) * 100)
+            table.insert(textParts, "💙 " .. healthPercent .. "%")
+        end
+    end
+    
+    -- Distance - FIXED: Use actual calculated distance
+    if ESPModule.Config.SHOW_DISTANCE then
+        table.insert(textParts, "📐 " .. math.floor(distance) .. " studs")
+    end
+    
+    -- Set text
+    esp.elements.textLabel.Text = table.concat(textParts, "\n")
+    esp.elements.textLabel.TextColor3 = ESPModule.Config.TEXT_COLOR
+    esp.elements.textLabel.TextSize = ESPModule.Config.TEXT_SIZE
+    esp.elements.textLabel.TextStrokeColor3 = ESPModule.Config.BOX_COLOR
+    
+    -- Update tracer - FIXED: Use LocalPlayer for tracer
+    local localPlayer = Players.LocalPlayer
+    local localCharacter = localPlayer.Character
+    local localRoot = localCharacter and localCharacter:FindFirstChild("HumanoidRootPart")
+    
+    if localRoot and isAlive then
+        esp.elements.attachment0.Parent = localRoot
+        esp.elements.attachment1.Parent = humanoidRootPart
+        esp.elements.tracer.Enabled = true
+        esp.elements.tracer.Parent = localRoot
+    else
+        esp.elements.tracer.Enabled = false
+        esp.elements.attachment0.Parent = nil
+        esp.elements.attachment1.Parent = nil
+    end
+end
+
+local function updateESP(player, esp, dt)
+    local character = player.Character
+    if not character or not player.Parent then
+        for _, part in ipairs(esp.elements.bodyParts) do
+            part.Adornee = nil
+        end
+        for _, circle in ipairs(esp.elements.circles) do
+            circle.Adornee = nil
+        end
+        esp.elements.billboard.Adornee = nil
+        esp.elements.tracer.Enabled = false
+        return
+    end
+    
+    local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+    if not humanoidRootPart then 
+        for _, part in ipairs(esp.elements.bodyParts) do
+            part.Adornee = nil
+        end
+        for _, circle in ipairs(esp.elements.circles) do
+            circle.Adornee = nil
+        end
+        esp.elements.billboard.Adornee = nil
+        return
+    end
+    
+    local isAlive = checkPlayerState(player)
+    esp.isAlive = isAlive
+    
+    -- FIXED: Calculate distance properly using LocalPlayer
+    local localPlayer = Players.LocalPlayer
+    local localCharacter = localPlayer.Character
+    local localRoot = localCharacter and localCharacter:FindFirstChild("HumanoidRootPart")
+    local distance = 0
+    
+    if localRoot then
+        distance = (humanoidRootPart.Position - localRoot.Position).Magnitude
+        if distance > ESPModule.Config.MAX_DISTANCE then
+            for _, part in ipairs(esp.elements.bodyParts) do
+                part.Adornee = nil
+            end
+            for _, circle in ipairs(esp.elements.circles) do
+                circle.Adornee = nil
+            end
+            esp.elements.billboard.Adornee = nil
+            return
+        end
+    end
+    
+    updateESPDisplay(player, esp, distance, isAlive)
+    
+    if isAlive then
+        updatePulseEffect(esp, dt)
+        updateCircleEffect(esp, dt, character)
+    else
+        for _, part in ipairs(esp.elements.bodyParts) do
+            part.Transparency = ESPModule.Config.TRANSPARENCY + 0.1
+        end
+        for _, circle in ipairs(esp.elements.circles) do
+            circle.Transparency = 0.9
+        end
+    end
+    
+    esp.lastUpdate = tick()
+end
+
+local function onPlayerAdded(player)
+    if player == Players.LocalPlayer then return end
+    
+    local connections = {}
+    
+    connections.characterAdded = player.CharacterAdded:Connect(function(character)
+        wait(1)
+        if espEnabled then
+            local esp = createBodyESP(player)
+            esp.lastUpdate = 0
+        end
+    end)
+    
+    connections.characterRemoving = player.CharacterRemoving:Connect(function()
+        if espCache[player] then
+            cleanUpESP(player)
+        end
+    end)
+    
+    espPlayerData[player] = {
+        connections = connections
+    }
+    
+    if player.Character and espEnabled then
+        local esp = createBodyESP(player)
+        esp.lastUpdate = 0
+    end
+end
+
+local function onPlayerRemoving(player)
+    cleanUpESP(player)
+end
+
+local function startESP()
+    if espEnabled then return end
+    
+    espEnabled = true
+    ESPModule.Enabled = true
+    
+    -- Initialize for existing players
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= Players.LocalPlayer then
+            onPlayerAdded(player)
+        end
+    end
+    
+    -- Connect events
+    playerAddedConnection = Players.PlayerAdded:Connect(onPlayerAdded)
+    playerRemovingConnection = Players.PlayerRemoving:Connect(onPlayerRemoving)
+    
+    -- Start update loop
+    espUpdateConnection = RunService.Heartbeat:Connect(function(dt)
+        if not espEnabled then return end
+        
+        for player, esp in pairs(espCache) do
+            if player and player.Parent then
+                local updateInterval = esp.isAlive and ESPModule.Config.UPDATE_INTERVAL_ALIVE or ESPModule.Config.UPDATE_INTERVAL_DEAD
+                
+                if tick() - esp.lastUpdate >= updateInterval then
+                    updateESP(player, esp, dt)
+                end
+            else
+                cleanUpESP(player)
+            end
+        end
+    end)
+end
+
+local function stopESP()
+    if not espEnabled then return end
+    
+    espEnabled = false
+    ESPModule.Enabled = false
+    
+    if espUpdateConnection then
+        espUpdateConnection:Disconnect()
+        espUpdateConnection = nil
+    end
+    
+    if playerAddedConnection then
+        playerAddedConnection:Disconnect()
+        playerAddedConnection = nil
+    end
+    
+    if playerRemovingConnection then
+        playerRemovingConnection:Disconnect()
+        playerRemovingConnection = nil
+    end
+    
+    -- Clean up all ESP and player data
+    for player, _ in pairs(espCache) do
+        cleanUpESP(player)
+    end
+    
+    for player, _ in pairs(espPlayerData) do
+        cleanUpESP(player)
+    end
+    
+    -- Clear data
+    espCache = {}
+    espPlayerData = {}
+end
+
+function ESPModule.Toggle()
+    if espEnabled then
+        stopESP()
+        return false
+    else
+        startESP()
+        return true
+    end
+end
+
+function ESPModule.SetTransparency(transparency)
+    ESPModule.Config.TRANSPARENCY = transparency
+    -- Update existing ESP elements
+    for _, esp in pairs(espCache) do
+        for _, part in ipairs(esp.elements.bodyParts) do
+            if part then
+                part.Transparency = transparency
+            end
+        end
+    end
+end
+
+function ESPModule.SetMaxDistance(distance)
+    ESPModule.Config.MAX_DISTANCE = distance
+end
+
+function ESPModule.SetShowHP(show)
+    ESPModule.Config.SHOW_HP = show
+end
+
+function ESPModule.SetShowName(show)
+    ESPModule.Config.SHOW_NAME = show
+end
+
+function ESPModule.SetShowDistance(show)
+    ESPModule.Config.SHOW_DISTANCE = show
+end
+
+function ESPModule.SetTextSize(size)
+    ESPModule.Config.TEXT_SIZE = size
+    -- Update existing ESP text
+    for _, esp in pairs(espCache) do
+        if esp.elements.textLabel then
+            esp.elements.textLabel.TextSize = size
+        end
+    end
+end
+
+function ESPModule.SetTextColor(color)
+    ESPModule.Config.TEXT_COLOR = color
+    -- Update existing ESP text
+    for _, esp in pairs(espCache) do
+        if esp.elements.textLabel then
+            esp.elements.textLabel.TextColor3 = color
+        end
+    end
+end
+
+function ESPModule.SetBoxColor(color)
+    ESPModule.Config.BOX_COLOR = color
+    -- Update existing ESP elements
+    for _, esp in pairs(espCache) do
+        for _, part in ipairs(esp.elements.bodyParts) do
+            if part then
+                part.Color3 = color
+            end
+        end
+        if esp.elements.textLabel then
+            esp.elements.textLabel.TextStrokeColor3 = color
+        end
+        if esp.elements.tracer then
+            esp.elements.tracer.Color = ColorSequence.new({
+                ColorSequenceKeypoint.new(0, color),
+                ColorSequenceKeypoint.new(1, ESPModule.Config.COLORS.ALIVE.SECONDARY)
+            })
+        end
+    end
+end
+
+-- Остальная часть кода с UI остается без изменений...
+-- [Здесь должен быть весь остальной код создания интерфейса]
+
+-- Create main container with highest ZIndex
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "NeverloseUI"
+screenGui.Parent = CoreGui
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
+screenGui.ResetOnSpawn = false
+screenGui.Enabled = false
+screenGui.DisplayOrder = 999
+
+-- Background
+local background = Instance.new("Frame")
+background.Name = "Background"
+background.Parent = screenGui
+background.Size = UDim2.new(1, 0, 1, 0)
+background.BackgroundColor3 = Color3.fromRGB(0, 10, 25)
+background.BackgroundTransparency = 0.6
+background.BorderSizePixel = 0
+background.ZIndex = 1
+
+-- Main window
+local mainWindow = Instance.new("Frame")
+mainWindow.Name = "MainWindow"
+mainWindow.Parent = screenGui
+mainWindow.AnchorPoint = Vector2.new(0.5, 0.5)
+mainWindow.Position = UDim2.new(0.5, 0, 0.5, 0)
+mainWindow.Size = UDim2.new(0, 650, 0, 500)
+mainWindow.BackgroundColor3 = Color3.fromRGB(10, 15, 30)
+mainWindow.BackgroundTransparency = currentTransparency
+mainWindow.BorderSizePixel = 0
+mainWindow.ZIndex = 2
+
+local mainCorner = Instance.new("UICorner")
+mainCorner.CornerRadius = UDim.new(0, 12)
+mainCorner.Parent = mainWindow
+
+local mainStroke = Instance.new("UIStroke")
+mainStroke.Parent = mainWindow
+mainStroke.Color = currentThemeColor
+mainStroke.Thickness = 1.5
+mainStroke.Transparency = 0.4
+
+-- Top bar
+local topBar = Instance.new("Frame")
+topBar.Name = "TopBar"
+topBar.Parent = mainWindow
+topBar.Size = UDim2.new(1, 0, 0, 45)
+topBar.Position = UDim2.new(0, 0, 0, 0)
+topBar.BackgroundColor3 = Color3.fromRGB(0, 40, 80)
+topBar.BackgroundTransparency = 0.3
+topBar.BorderSizePixel = 0
+topBar.ZIndex = 3
+
+local topBarCorner = Instance.new("UICorner")
+topBarCorner.CornerRadius = UDim.new(0, 12)
+topBarCorner.Parent = topBar
+
+-- Title
+local titleLabel = Instance.new("TextLabel")
+titleLabel.Name = "Title"
+titleLabel.Parent = topBar
+titleLabel.AnchorPoint = Vector2.new(0.5, 0.5)
+titleLabel.Position = UDim2.new(0.5, 0, 0.5, 0)
+titleLabel.Size = UDim2.new(0, 200, 0, 30)
+titleLabel.BackgroundTransparency = 1
+titleLabel.Text = "NEVERLOSE"
+titleLabel.TextColor3 = currentThemeColor
+titleLabel.TextSize = 20
+titleLabel.Font = Enum.Font.GothamBold
+titleLabel.TextStrokeTransparency = 0.7
+titleLabel.ZIndex = 4
+
+-- Navigation panel
+local navPanel = Instance.new("Frame")
+navPanel.Name = "NavPanel"
+navPanel.Parent = mainWindow
+navPanel.Size = UDim2.new(0, 160, 1, -45)
+navPanel.Position = UDim2.new(0, 0, 0, 45)
+navPanel.BackgroundColor3 = Color3.fromRGB(8, 12, 25)
+navPanel.BackgroundTransparency = 0.4
+navPanel.BorderSizePixel = 0
+navPanel.ZIndex = 2
+
+local navContainer = Instance.new("Frame")
+navContainer.Name = "NavContainer"
+navContainer.Parent = navPanel
+navContainer.Size = UDim2.new(1, 0, 1, 0)
+navContainer.BackgroundTransparency = 1
+navContainer.ZIndex = 3
+
+local navListLayout = Instance.new("UIListLayout")
+navListLayout.Parent = navContainer
+navListLayout.Padding = UDim.new(0, 3)
+navListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+
+local navPadding = Instance.new("UIPadding")
+navPadding.Parent = navContainer
+navPadding.PaddingTop = UDim.new(0, 15)
+
+-- Content panel
+local contentPanel = Instance.new("Frame")
+contentPanel.Name = "ContentPanel"
+contentPanel.Parent = mainWindow
+contentPanel.Size = UDim2.new(1, -160, 1, -45)
+contentPanel.Position = UDim2.new(0, 160, 0, 45)
+contentPanel.BackgroundColor3 = Color3.fromRGB(12, 18, 35)
+contentPanel.BackgroundTransparency = 0.4
+contentPanel.BorderSizePixel = 0
+contentPanel.ZIndex = 2
+
+-- Tab management variables
+local tabContents = {}
+local tabIndicators = {}
+local tabHoverEffects = {}
+local currentTab = "RAGE"
+local bindConnection = nil
+local changingBind = false
+
+-- Theme update functions
+local function UpdateTheme(color)
+    currentThemeColor = color
+    mainStroke.Color = color
+    titleLabel.TextColor3 = color
+    
+    for tabName, indicator in pairs(tabIndicators) do
+        if indicator.Visible then
+            indicator.BackgroundColor3 = color
+        end
+    end
+end
+
+local function UpdateTransparency(transparency)
+    currentTransparency = transparency
+    mainWindow.BackgroundTransparency = transparency
+    navPanel.BackgroundTransparency = transparency + 0.2
+    contentPanel.BackgroundTransparency = transparency + 0.2
+end
+
+-- Reusable UI creation functions
+local function CreateToggleSetting(parent, name, initialValue, callback)
+    local setting = Instance.new("Frame")
+    setting.Name = name .. "Setting"
+    setting.Parent = parent
+    setting.Size = UDim2.new(0.9, 0, 0, 50)
+    setting.BackgroundColor3 = Color3.fromRGB(20, 30, 60)
+    setting.BackgroundTransparency = 0.6
+    setting.BorderSizePixel = 0
+    setting.ZIndex = 4
+    
+    local corner = Instance.new("UICorner")
+    corner.Parent = setting
+    
+    local label = Instance.new("TextLabel")
+    label.Name = "Label"
+    label.Parent = setting
+    label.Size = UDim2.new(0.7, 0, 1, 0)
+    label.Position = UDim2.new(0, 15, 0, 0)
+    label.BackgroundTransparency = 1
+    label.Text = name
+    label.TextColor3 = Color3.fromRGB(220, 230, 255)
+    label.TextSize = 14
+    label.Font = Enum.Font.Gotham
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.ZIndex = 5
+    
+    local toggleButton = Instance.new("TextButton")
+    toggleButton.Name = "Toggle"
+    toggleButton.Parent = setting
+    toggleButton.Size = UDim2.new(0, 70, 0, 30)
+    toggleButton.Position = UDim2.new(1, -85, 0.5, -15)
+    toggleButton.BackgroundColor3 = initialValue and Color3.fromRGB(0, 120, 255) or Color3.fromRGB(40, 50, 90)
+    toggleButton.BackgroundTransparency = 0.5
+    toggleButton.Text = initialValue and "ON" or "OFF"
+    toggleButton.TextColor3 = initialValue and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(255, 120, 120)
+    toggleButton.TextSize = 12
+    toggleButton.Font = Enum.Font.GothamBold
+    toggleButton.BorderSizePixel = 0
+    toggleButton.ZIndex = 5
+    
+    local toggleCorner = Instance.new("UICorner")
+    toggleCorner.CornerRadius = UDim.new(0, 6)
+    toggleCorner.Parent = toggleButton
+    
+    local toggleStroke = Instance.new("UIStroke")
+    toggleStroke.Parent = toggleButton
+    toggleStroke.Color = Color3.fromRGB(0, 80, 160)
+    toggleStroke.Thickness = 1
+    toggleStroke.Transparency = 0.6
+    
+    toggleButton.MouseButton1Click:Connect(function()
+        local newValue = not initialValue
+        initialValue = newValue
+        
+        local tweenInfo = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+        
+        if newValue then
+            local tween = TweenService:Create(toggleButton, tweenInfo, {
+                BackgroundColor3 = Color3.fromRGB(0, 120, 255),
+                BackgroundTransparency = 0.4,
+                TextColor3 = Color3.fromRGB(255, 255, 255)
+            })
+            tween:Play()
+            toggleButton.Text = "ON"
+        else
+            local tween = TweenService:Create(toggleButton, tweenInfo, {
+                BackgroundColor3 = Color3.fromRGB(40, 50, 90),
+                BackgroundTransparency = 0.5,
+                TextColor3 = Color3.fromRGB(255, 120, 120)
+            })
+            tween:Play()
+            toggleButton.Text = "OFF"
+        end
+        
+        if callback then
+            callback(newValue)
+        end
+    end)
+    
+    return setting
+end
+
+local function CreateColorPicker(parent, name, initialColor, callback)
+    local setting = Instance.new("Frame")
+    setting.Name = name .. "Setting"
+    setting.Parent = parent
+    setting.Size = UDim2.new(0.9, 0, 0, 50)
+    setting.BackgroundColor3 = Color3.fromRGB(20, 30, 60)
+    setting.BackgroundTransparency = 0.6
+    setting.BorderSizePixel = 0
+    setting.ZIndex = 4
+    
+    local corner = Instance.new("UICorner")
+    corner.Parent = setting
+    
+    local label = Instance.new("TextLabel")
+    label.Name = "Label"
+    label.Parent = setting
+    label.Size = UDim2.new(0.7, 0, 1, 0)
+    label.Position = UDim2.new(0, 15, 0, 0)
+    label.BackgroundTransparency = 1
+    label.Text = name
+    label.TextColor3 = Color3.fromRGB(220, 230, 255)
+    label.TextSize = 14
+    label.Font = Enum.Font.Gotham
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.ZIndex = 5
+    
+    local colorButton = Instance.new("TextButton")
+    colorButton.Name = "ColorButton"
+    colorButton.Parent = setting
+    colorButton.Size = UDim2.new(0, 80, 0, 30)
+    colorButton.Position = UDim2.new(1, -90, 0.5, -15)
+    colorButton.BackgroundColor3 = initialColor
+    colorButton.BackgroundTransparency = 0.4
+    colorButton.Text = "Change"
+    colorButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    colorButton.TextSize = 12
+    colorButton.Font = Enum.Font.GothamBold
+    colorButton.BorderSizePixel = 0
+    colorButton.ZIndex = 5
+    
+    local colorButtonCorner = Instance.new("UICorner")
+    colorButtonCorner.Parent = colorButton
+    
+    colorButton.MouseButton1Click:Connect(function()
+        local colors = {
+            Color3.fromRGB(0, 150, 255), -- Blue
+            Color3.fromRGB(255, 0, 0),   -- Red
+            Color3.fromRGB(0, 255, 0),   -- Green
+            Color3.fromRGB(255, 255, 0), -- Yellow
+            Color3.fromRGB(255, 0, 255), -- Pink
+            Color3.fromRGB(0, 255, 255), -- Cyan
+            Color3.fromRGB(255, 255, 255) -- White
+        }
+        local currentIndex = 1
+        for i, color in ipairs(colors) do
+            if color == initialColor then
+                currentIndex = i
+                break
+            end
+        end
+        local nextIndex = (currentIndex % #colors) + 1
+        local newColor = colors[nextIndex]
+        
+        colorButton.BackgroundColor3 = newColor
+        initialColor = newColor
+        
+        if callback then
+            callback(newColor)
+        end
+    end)
+    
+    return setting
+end
+
+local function CreateSlider(parent, name, min, max, initialValue, valueFormat, callback)
+    local setting = Instance.new("Frame")
+    setting.Name = name .. "Setting"
+    setting.Parent = parent
+    setting.Size = UDim2.new(0.9, 0, 0, 70)
+    setting.BackgroundColor3 = Color3.fromRGB(20, 30, 60)
+    setting.BackgroundTransparency = 0.6
+    setting.BorderSizePixel = 0
+    setting.ZIndex = 4
+    
+    local corner = Instance.new("UICorner")
+    corner.Parent = setting
+    
+    local label = Instance.new("TextLabel")
+    label.Name = "Label"
+    label.Parent = setting
+    label.Size = UDim2.new(0.9, 0, 0, 20)
+    label.Position = UDim2.new(0.05, 0, 0, 5)
+    label.BackgroundTransparency = 1
+    label.Text = name .. ": " .. valueFormat(initialValue)
+    label.TextColor3 = Color3.fromRGB(220, 230, 255)
+    label.TextSize = 14
+    label.Font = Enum.Font.Gotham
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.ZIndex = 5
+    
+    -- Slider track
+    local sliderTrack = Instance.new("Frame")
+    sliderTrack.Name = "SliderTrack"
+    sliderTrack.Parent = setting
+    sliderTrack.Size = UDim2.new(0.9, 0, 0, 3)
+    sliderTrack.Position = UDim2.new(0.05, 0, 0, 35)
+    sliderTrack.BackgroundColor3 = Color3.fromRGB(15, 20, 40)
+    sliderTrack.BorderSizePixel = 0
+    sliderTrack.ZIndex = 5
+    
+    local trackCorner = Instance.new("UICorner")
+    trackCorner.CornerRadius = UDim.new(1, 0)
+    trackCorner.Parent = sliderTrack
+    
+    -- Slider fill
+    local sliderFill = Instance.new("Frame")
+    sliderFill.Name = "SliderFill"
+    sliderFill.Parent = sliderTrack
+    sliderFill.Size = UDim2.new((initialValue - min) / (max - min), 0, 1, 0)
+    sliderFill.BackgroundColor3 = currentThemeColor
+    sliderFill.BorderSizePixel = 0
+    sliderFill.ZIndex = 6
+    
+    local fillCorner = Instance.new("UICorner")
+    fillCorner.CornerRadius = UDim.new(1, 0)
+    fillCorner.Parent = sliderFill
+    
+    -- Slider thumb
+    local sliderThumb = Instance.new("Frame")
+    sliderThumb.Name = "SliderThumb"
+    sliderThumb.Parent = sliderTrack
+    sliderThumb.Size = UDim2.new(0, 9, 0, 9)
+    sliderThumb.Position = UDim2.new((initialValue - min) / (max - min), -4.5, 0.5, -4.5)
+    sliderThumb.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    sliderThumb.BackgroundTransparency = 0.8
+    sliderThumb.BorderSizePixel = 0
+    sliderThumb.ZIndex = 7
+    
+    local thumbCorner = Instance.new("UICorner")
+    thumbCorner.CornerRadius = UDim.new(1, 0)
+    thumbCorner.Parent = sliderThumb
+    
+    -- Slider functionality
+    local dragging = false
+    
+    local function updateSlider(input)
+        local relativeX = (input.Position.X - sliderTrack.AbsolutePosition.X) / sliderTrack.AbsoluteSize.X
+        relativeX = math.clamp(relativeX, 0, 1)
+        
+        local newValue = math.floor(min + relativeX * (max - min))
+        
+        sliderFill.Size = UDim2.new(relativeX, 0, 1, 0)
+        sliderThumb.Position = UDim2.new(relativeX, -4.5, 0.5, -4.5)
+        label.Text = name .. ": " .. valueFormat(newValue)
+        
+        if callback then
+            callback(newValue)
+        end
+    end
+    
+    sliderThumb.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true
+        end
+    end)
+    
+    sliderThumb.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = false
+        end
+    end)
+    
+    sliderTrack.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true
+            updateSlider(input)
+        end
+    end)
+    
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+            updateSlider(input)
+        end
+    end)
+    
+    return setting
+end
+
+-- Function to create tab content
+local function CreateTabContent(tabName)
+    local contentFrame = Instance.new("Frame")
+    contentFrame.Name = tabName .. "Content"
+    contentFrame.Parent = contentPanel
+    contentFrame.Size = UDim2.new(1, 0, 1, 0)
+    contentFrame.BackgroundTransparency = 1
+    contentFrame.Visible = false
+    contentFrame.ZIndex = 3
+    
+    -- Tab title
+    local tabTitle = Instance.new("TextLabel")
+    tabTitle.Name = "TabTitle"
+    tabTitle.Parent = contentFrame
+    tabTitle.Size = UDim2.new(0.9, 0, 0, 30)
+    tabTitle.Position = UDim2.new(0.05, 0, 0, 5)
+    tabTitle.BackgroundTransparency = 1
+    tabTitle.Text = tabName .. " SETTINGS"
+    tabTitle.TextColor3 = Color3.fromRGB(0, 180, 255)
+    tabTitle.TextSize = 16
+    tabTitle.Font = Enum.Font.GothamBold
+    tabTitle.TextStrokeTransparency = 0.8
+    tabTitle.TextXAlignment = Enum.TextXAlignment.Left
+    tabTitle.ZIndex = 4
+    
+    -- Divider
+    local divider = Instance.new("Frame")
+    divider.Name = "Divider"
+    divider.Parent = contentFrame
+    divider.Size = UDim2.new(0.9, 0, 0, 1)
+    divider.Position = UDim2.new(0.05, 0, 0, 35)
+    divider.BackgroundColor3 = Color3.fromRGB(0, 100, 200)
+    divider.BackgroundTransparency = 0.5
+    divider.BorderSizePixel = 0
+    divider.ZIndex = 4
+    
+    -- Settings container
+    local settingsContainer = Instance.new("ScrollingFrame")
+    settingsContainer.Name = "SettingsContainer"
+    settingsContainer.Parent = contentFrame
+    settingsContainer.Size = UDim2.new(1, 0, 1, -40)
+    settingsContainer.Position = UDim2.new(0, 0, 0, 40)
+    settingsContainer.BackgroundTransparency = 1
+    settingsContainer.ZIndex = 3
+    settingsContainer.ScrollBarThickness = 5
+    settingsContainer.CanvasSize = UDim2.new(0, 0, 0, 0)
+    
+    local settingsLayout = Instance.new("UIListLayout")
+    settingsLayout.Parent = settingsContainer
+    settingsLayout.Padding = UDim.new(0, 8)
+    settingsLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+    
+    local settingsPadding = Instance.new("UIPadding")
+    settingsPadding.Parent = settingsContainer
+    settingsPadding.PaddingTop = UDim.new(0, 10)
+    
+    -- Update canvas size
+    settingsLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+        settingsContainer.CanvasSize = UDim2.new(0, 0, 0, settingsLayout.AbsoluteContentSize.Y + 20)
+    end)
+    
+    if tabName == "SETTINGS" then
+        -- Theme color setting
+        local colorSetting = Instance.new("Frame")
+        colorSetting.Name = "ColorSetting"
+        colorSetting.Parent = settingsContainer
+        colorSetting.Size = UDim2.new(0.9, 0, 0, 50)
+        colorSetting.BackgroundColor3 = Color3.fromRGB(20, 30, 60)
+        colorSetting.BackgroundTransparency = 0.6
+        colorSetting.BorderSizePixel = 0
+        colorSetting.ZIndex = 4
+        
+        local colorCorner = Instance.new("UICorner")
+        colorCorner.Parent = colorSetting
+        
+        local colorLabel = Instance.new("TextLabel")
+        colorLabel.Name = "ColorLabel"
+        colorLabel.Parent = colorSetting
+        colorLabel.Size = UDim2.new(0.7, 0, 1, 0)
+        colorLabel.Position = UDim2.new(0, 15, 0, 0)
+        colorLabel.BackgroundTransparency = 1
+        colorLabel.Text = "Theme Color"
+        colorLabel.TextColor3 = Color3.fromRGB(220, 230, 255)
+        colorLabel.TextSize = 14
+        colorLabel.Font = Enum.Font.Gotham
+        colorLabel.TextXAlignment = Enum.TextXAlignment.Left
+        colorLabel.ZIndex = 5
+        
+        local colorButton = Instance.new("TextButton")
+        colorButton.Name = "ColorButton"
+        colorButton.Parent = colorSetting
+        colorButton.Size = UDim2.new(0, 80, 0, 30)
+        colorButton.Position = UDim2.new(1, -90, 0.5, -15)
+        colorButton.BackgroundColor3 = currentThemeColor
+        colorButton.BackgroundTransparency = 0.4
+        colorButton.Text = "Change"
+        colorButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+        colorButton.TextSize = 12
+        colorButton.Font = Enum.Font.GothamBold
+        colorButton.BorderSizePixel = 0
+        colorButton.ZIndex = 5
+        
+        local colorButtonCorner = Instance.new("UICorner")
+        colorButtonCorner.Parent = colorButton
+        
+        colorButton.MouseButton1Click:Connect(function()
+            local colors = {
+                Color3.fromRGB(0, 100, 255),
+                Color3.fromRGB(255, 0, 0),
+                Color3.fromRGB(0, 255, 0),
+                Color3.fromRGB(255, 255, 0),
+                Color3.fromRGB(255, 0, 255)
+            }
+            local currentIndex = 1
+            for i, color in ipairs(colors) do
+                if color == currentThemeColor then
+                    currentIndex = i
+                    break
+                end
+            end
+            local nextIndex = (currentIndex % #colors) + 1
+            UpdateTheme(colors[nextIndex])
+            colorButton.BackgroundColor3 = colors[nextIndex]
+        end)
+        
+        -- Transparency slider
+        CreateSlider(settingsContainer, "Transparency", 0, 100, currentTransparency * 100, 
+            function(value) return value .. "%" end,
+            function(value)
+                UpdateTransparency(value / 100)
+            end)
+        
+        -- Bind setting
+        local bindSetting = Instance.new("Frame")
+        bindSetting.Name = "BindSetting"
+        bindSetting.Parent = settingsContainer
+        bindSetting.Size = UDim2.new(0.9, 0, 0, 50)
+        bindSetting.BackgroundColor3 = Color3.fromRGB(20, 30, 60)
+        bindSetting.BackgroundTransparency = 0.6
+        bindSetting.BorderSizePixel = 0
+        bindSetting.ZIndex = 4
+        
+        local bindCorner = Instance.new("UICorner")
+        bindCorner.Parent = bindSetting
+        
+        local bindLabel = Instance.new("TextLabel")
+        bindLabel.Name = "BindLabel"
+        bindLabel.Parent = bindSetting
+        bindLabel.Size = UDim2.new(0.7, 0, 1, 0)
+        bindLabel.Position = UDim2.new(0, 15, 0, 0)
+        bindLabel.BackgroundTransparency = 1
+        bindLabel.Text = "Menu Bind"
+        bindLabel.TextColor3 = Color3.fromRGB(220, 230, 255)
+        bindLabel.TextSize = 14
+        bindLabel.Font = Enum.Font.Gotham
+        bindLabel.TextXAlignment = Enum.TextXAlignment.Left
+        bindLabel.ZIndex = 5
+        
+        local bindButton = Instance.new("TextButton")
+        bindButton.Name = "BindButton"
+        bindButton.Parent = bindSetting
+        bindButton.Size = UDim2.new(0, 120, 0, 30)
+        bindButton.Position = UDim2.new(1, -130, 0.5, -15)
+        bindButton.BackgroundColor3 = Color3.fromRGB(0, 100, 200)
+        bindButton.BackgroundTransparency = 0.4
+        bindButton.Text = "Change Bind"
+        bindButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+        bindButton.TextSize = 12
+        bindButton.Font = Enum.Font.GothamBold
+        bindButton.BorderSizePixel = 0
+        bindButton.ZIndex = 5
+        
+        local bindButtonCorner = Instance.new("UICorner")
+        bindButtonCorner.Parent = bindButton
+        
+        bindButton.MouseButton1Click:Connect(function()
+            if bindConnection then
+                bindConnection:Disconnect()
+                bindConnection = nil
+            end
+            
+            bindButton.Text = "Press any key..."
+            changingBind = true
+            
+            bindConnection = UserInputService.InputBegan:Connect(function(input, gameProcessed)
+                if gameProcessed then return end
+                if input.UserInputType == Enum.UserInputType.Keyboard then
+                    currentBind = input.KeyCode
+                    if bindInfo then
+                        bindInfo.Text = "Bind: " .. tostring(currentBind):gsub("Enum.KeyCode.", "")
+                    end
+                    if bindButton then
+                        bindButton.Text = "Change Bind"
+                    end
+                    changingBind = false
+                    
+                    if bindConnection then
+                        bindConnection:Disconnect()
+                        bindConnection = nil
+                    end
+                end
+            end)
+        end)
+        
+    elseif tabName == "LUA" then
+        -- Animation system for LUA tab
+        local animFunSetting = Instance.new("Frame")
+        animFunSetting.Name = "AnimFunSetting"
+        animFunSetting.Parent = settingsContainer
+        animFunSetting.Size = UDim2.new(0.9, 0, 0, 50)
+        animFunSetting.BackgroundColor3 = Color3.fromRGB(20, 30, 60)
+        animFunSetting.BackgroundTransparency = 0.6
+        animFunSetting.BorderSizePixel = 0
+        animFunSetting.ZIndex = 4
+        
+        local animFunCorner = Instance.new("UICorner")
+        animFunCorner.Parent = animFunSetting
+        
+        local animFunLabel = Instance.new("TextLabel")
+        animFunLabel.Name = "AnimFunLabel"
+        animFunLabel.Parent = animFunSetting
+        animFunLabel.Size = UDim2.new(0.5, 0, 1, 0)
+        animFunLabel.Position = UDim2.new(0, 15, 0, 0)
+        animFunLabel.BackgroundTransparency = 1
+        animFunLabel.Text = "AnimFun"
+        animFunLabel.TextColor3 = Color3.fromRGB(220, 230, 255)
+        animFunLabel.TextSize = 14
+        animFunLabel.Font = Enum.Font.Gotham
+        animFunLabel.TextXAlignment = Enum.TextXAlignment.Left
+        animFunLabel.ZIndex = 5
+        
+        local animFunButton = Instance.new("TextButton")
+        animFunButton.Name = "AnimFunButton"
+        animFunButton.Parent = animFunSetting
+        animFunButton.Size = UDim2.new(0, 70, 0, 30)
+        animFunButton.Position = UDim2.new(0.6, 10, 0.5, -15)
+        animFunButton.BackgroundColor3 = Color3.fromRGB(40, 50, 90)
+        animFunButton.BackgroundTransparency = 0.5
+        animFunButton.Text = "OFF"
+        animFunButton.TextColor3 = Color3.fromRGB(255, 120, 120)
+        animFunButton.TextSize = 12
+        animFunButton.Font = Enum.Font.GothamBold
+        animFunButton.BorderSizePixel = 0
+        animFunButton.ZIndex = 5
+        
+        local animFunButtonCorner = Instance.new("UICorner")
+        animFunButtonCorner.CornerRadius = UDim.new(0, 6)
+        animFunButtonCorner.Parent = animFunButton
+        
+        local animFunButtonStroke = Instance.new("UIStroke")
+        animFunButtonStroke.Parent = animFunButton
+        animFunButtonStroke.Color = Color3.fromRGB(0, 80, 160)
+        animFunButtonStroke.Thickness = 1
+        animFunButtonStroke.Transparency = 0.6
+        
+        -- Animation bind input field (сдвинут левее)
+        local animBindFrame = Instance.new("Frame")
+        animBindFrame.Name = "AnimBindFrame"
+        animBindFrame.Parent = animFunSetting
+        animBindFrame.Size = UDim2.new(0, 80, 0, 25)
+        animBindFrame.Position = UDim2.new(0.45, -85, 0.5, -12.5) -- Сдвинут левее
+        animBindFrame.BackgroundColor3 = Color3.fromRGB(30, 40, 70)
+        animBindFrame.BackgroundTransparency = 0.7
+        animBindFrame.BorderSizePixel = 0
+        animBindFrame.ZIndex = 5
+        
+        local animBindCorner = Instance.new("UICorner")
+        animBindCorner.CornerRadius = UDim.new(0, 4)
+        animBindCorner.Parent = animBindFrame
+        
+        local animBindTextBox = Instance.new("TextBox")
+        animBindTextBox.Name = "AnimBindTextBox"
+        animBindTextBox.Parent = animBindFrame
+        animBindTextBox.Size = UDim2.new(0.9, 0, 0.8, 0)
+        animBindTextBox.Position = UDim2.new(0.05, 0, 0.1, 0)
+        animBindTextBox.BackgroundTransparency = 1
+        animBindTextBox.Text = "V"
+        animBindTextBox.TextColor3 = Color3.fromRGB(220, 230, 255)
+        animBindTextBox.TextSize = 12
+        animBindTextBox.Font = Enum.Font.Gotham
+        animBindTextBox.PlaceholderText = "Bind key"
+        animBindTextBox.ZIndex = 6
+        
+        -- Animation toggle functionality
+        animFunButton.MouseButton1Click:Connect(function()
+            local isNowPlaying = AnimationModule.ToggleAnimation()
+            local tweenInfo = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+            
+            if isNowPlaying then
+                local tween = TweenService:Create(animFunButton, tweenInfo, {
+                    BackgroundColor3 = Color3.fromRGB(0, 120, 255),
+                    BackgroundTransparency = 0.4,
+                    TextColor3 = Color3.fromRGB(255, 255, 255)
+                })
+                tween:Play()
+                animFunButton.Text = "ON"
+            else
+                local tween = TweenService:Create(animFunButton, tweenInfo, {
+                    BackgroundColor3 = Color3.fromRGB(40, 50, 90),
+                    BackgroundTransparency = 0.5,
+                    TextColor3 = Color3.fromRGB(255, 120, 120)
+                })
+                tween:Play()
+                animFunButton.Text = "OFF"
+            end
+        end)
+        
+        -- Animation bind change functionality
+        animBindTextBox.FocusLost:Connect(function(enterPressed)
+            if enterPressed then
+                local keyText = animBindTextBox.Text:upper()
+                local keyCode = Enum.KeyCode[keyText]
+                if keyCode then
+                    AnimationModule.SetBind(keyCode)
+                    animBindTextBox.Text = keyText
+                else
+                    animBindTextBox.Text = tostring(AnimationModule.Settings.CurrentBind):gsub("Enum.KeyCode.", "")
+                end
+            end
+        end)
+        
+    elseif tabName == "VISUALS" then
+        -- ESP Settings for VISUALS tab
+        
+        -- ESP Toggle
+        CreateToggleSetting(settingsContainer, "ESP", false, function(value)
+            local isNowEnabled = ESPModule.Toggle()
+            return isNowEnabled
+        end)
+        
+        -- ESP Display Options
+        CreateToggleSetting(settingsContainer, "Show Name", ESPModule.Config.SHOW_NAME, function(value)
+            ESPModule.SetShowName(value)
+        end)
+        
+        CreateToggleSetting(settingsContainer, "Show Health", ESPModule.Config.SHOW_HP, function(value)
+            ESPModule.SetShowHP(value)
+        end)
+        
+        CreateToggleSetting(settingsContainer, "Show Distance", ESPModule.Config.SHOW_DISTANCE, function(value)
+            ESPModule.SetShowDistance(value)
+        end)
+        
+        -- ESP Color Settings
+        CreateColorPicker(settingsContainer, "Text Color", ESPModule.Config.TEXT_COLOR, function(color)
+            ESPModule.SetTextColor(color)
+        end)
+        
+        CreateColorPicker(settingsContainer, "Box Color", ESPModule.Config.BOX_COLOR, function(color)
+            ESPModule.SetBoxColor(color)
+        end)
+        
+        -- ESP Size and Transparency Settings
+        CreateSlider(settingsContainer, "Text Size", 8, 24, ESPModule.Config.TEXT_SIZE, 
+            function(value) return value .. " px" end,
+            function(value)
+                ESPModule.SetTextSize(value)
+            end)
+        
+        CreateSlider(settingsContainer, "ESP Transparency", 0, 100, ESPModule.Config.TRANSPARENCY * 100, 
+            function(value) return value .. "%" end,
+            function(value)
+                ESPModule.SetTransparency(value / 100)
+            end)
+        
+        CreateSlider(settingsContainer, "Max Distance", 100, 2000, ESPModule.Config.MAX_DISTANCE, 
+            function(value) return value .. " studs" end,
+            function(value)
+                ESPModule.SetMaxDistance(value)
+            end)
+        
+    else
+        -- Test setting for other tabs
+        CreateToggleSetting(settingsContainer, tabName .. " Test Option", false, function(value)
+            -- Do nothing for test options
+        end)
+    end
+    
+    tabContents[tabName] = contentFrame
+    return contentFrame
+end
+
+-- Create navigation buttons function
+local function CreateNavButton(buttonName)
+    local button = Instance.new("TextButton")
+    button.Name = buttonName
+    button.Parent = navContainer
+    button.Size = UDim2.new(0.9, 0, 0, 48)
+    button.BackgroundColor3 = Color3.fromRGB(0, 60, 120)
+    button.BackgroundTransparency = 0.7
+    button.Text = buttonName
+    button.TextColor3 = Color3.fromRGB(180, 220, 255)
+    button.TextSize = 14
+    button.Font = Enum.Font.Gotham
+    button.BorderSizePixel = 0
+    button.AutoButtonColor = false
+    button.ZIndex = 4
+
+    local buttonCorner = Instance.new("UICorner")
+    buttonCorner.CornerRadius = UDim.new(0, 8)
+    buttonCorner.Parent = button
+
+    local buttonStroke = Instance.new("UIStroke")
+    buttonStroke.Parent = button
+    buttonStroke.Color = currentThemeColor
+    buttonStroke.Thickness = 1
+    buttonStroke.Transparency = 0.5
+    buttonStroke.LineJoinMode = Enum.LineJoinMode.Round
+
+    local indicator = Instance.new("Frame")
+    indicator.Name = "Indicator"
+    indicator.Parent = button
+    indicator.Size = UDim2.new(0, 4, 0.7, 0)
+    indicator.Position = UDim2.new(0, -10, 0.15, 0)
+    indicator.BackgroundColor3 = currentThemeColor
+    indicator.BorderSizePixel = 0
+    indicator.Visible = false
+    indicator.ZIndex = 5
+
+    local indicatorCorner = Instance.new("UICorner")
+    indicatorCorner.Parent = indicator
+
+    local hoverEffect = Instance.new("Frame")
+    hoverEffect.Name = "HoverEffect"
+    hoverEffect.Parent = button
+    hoverEffect.Size = UDim2.new(1, 0, 1, 0)
+    hoverEffect.BackgroundColor3 = Color3.fromRGB(0, 40, 80)
+    hoverEffect.BackgroundTransparency = 0.9
+    hoverEffect.BorderSizePixel = 0
+    hoverEffect.Visible = false
+    hoverEffect.ZIndex = 3
+
+    local effectCorner = Instance.new("UICorner")
+    effectCorner.Parent = hoverEffect
+
+    -- Hover animations
+    local function onHover()
+        if currentTab == buttonName then return end
+        
+        local tweenInfo = TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+        local buttonTween = TweenService:Create(button, tweenInfo, {
+            BackgroundColor3 = Color3.fromRGB(0, 100, 200),
+            BackgroundTransparency = 0.5,
+            TextColor3 = Color3.fromRGB(255, 255, 255)
+        })
+        
+        local strokeTween = TweenService:Create(buttonStroke, tweenInfo, {
+            Thickness = 2,
+            Transparency = 0.3
+        })
+        
+        hoverEffect.Visible = true
+        hoverEffect.BackgroundTransparency = 0.9
+        local effectTween = TweenService:Create(hoverEffect, TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+            BackgroundTransparency = 0.7
+        })
+        
+        buttonTween:Play()
+        strokeTween:Play()
+        effectTween:Play()
+    end
+
+    local function onUnhover()
+        if currentTab == buttonName then return end
+        
+        local tweenInfo = TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+        local buttonTween = TweenService:Create(button, tweenInfo, {
+            BackgroundColor3 = Color3.fromRGB(0, 60, 120),
+            BackgroundTransparency = 0.7,
+            TextColor3 = Color3.fromRGB(180, 220, 255)
+        })
+        
+        local strokeTween = TweenService:Create(buttonStroke, tweenInfo, {
+            Thickness = 1,
+            Transparency = 0.5
+        })
+        
+        local effectTween = TweenService:Create(hoverEffect, tweenInfo, {
+            BackgroundTransparency = 0.9
+        })
+        
+        buttonTween:Play()
+        strokeTween:Play()
+        effectTween:Play()
+        
+        effectTween.Completed:Connect(function()
+            if currentTab ~= buttonName then
+                hoverEffect.Visible = false
+            end
+        end)
+    end
+
+    button.MouseEnter:Connect(onHover)
+    button.MouseLeave:Connect(onUnhover)
+
+    return button, indicator, hoverEffect
+end
+
+-- Create tabs in correct order
+local tabs = {"RAGE", "VISUALS", "MISC", "CONFIGS", "LUA", "SETTINGS"}
+
+-- Create content for all tabs
+for i, tabName in ipairs(tabs) do
+    CreateTabContent(tabName)
+end
+
+-- Create navigation buttons
+for i, tabName in ipairs(tabs) do
+    local button, indicator, hoverEffect = CreateNavButton(tabName)
+    tabIndicators[tabName] = indicator
+    tabHoverEffects[tabName] = hoverEffect
+    
+    button.MouseButton1Click:Connect(function()
+        if currentTab ~= tabName then
+            -- Hide previous tab
+            if tabContents[currentTab] then
+                tabContents[currentTab].Visible = false
+            end
+            
+            -- Reset all indicators
+            for tab, ind in pairs(tabIndicators) do
+                ind.Visible = false
+                if tab ~= tabName then
+                    local prevButton = navContainer:FindFirstChild(tab)
+                    if prevButton then
+                        local resetTween = TweenService:Create(prevButton, 
+                            TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+                            BackgroundColor3 = Color3.fromRGB(0, 60, 120),
+                            BackgroundTransparency = 0.7,
+                            TextColor3 = Color3.fromRGB(180, 220, 255)
+                        })
+                        resetTween:Play()
+                        
+                        if tabHoverEffects[tab] then
+                            tabHoverEffects[tab].Visible = false
+                        end
+                    end
+                end
+            end
+            
+            -- Show active indicator
+            indicator.Visible = true
+            
+            -- Button activation animation
+            local buttonTween = TweenService:Create(button, 
+                TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+                BackgroundColor3 = Color3.fromRGB(0, 120, 255),
+                BackgroundTransparency = 0.3,
+                TextColor3 = Color3.fromRGB(255, 255, 255)
+            })
+            
+            local stroke = button:FindFirstChild("UIStroke")
+            if stroke then
+                local strokeTween = TweenService:Create(stroke, 
+                    TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+                    Thickness = 3,
+                    Transparency = 0.2
+                })
+                strokeTween:Play()
+            end
+            
+            buttonTween:Play()
+            
+            -- Show hover effect
+            hoverEffect.Visible = true
+            hoverEffect.BackgroundTransparency = 0.7
+            
+            -- Show new tab
+            currentTab = tabName
+            if tabContents[tabName] then
+                tabContents[tabName].Visible = true
+            end
+        end
+    end)
+    
+    -- Activate first tab
+    if i == 1 then
+        indicator.Visible = true
+        button.BackgroundColor3 = Color3.fromRGB(0, 120, 255)
+        button.BackgroundTransparency = 0.3
+        button.TextColor3 = Color3.fromRGB(255, 255, 255)
+        if tabContents[tabName] then
+            tabContents[tabName].Visible = true
+        end
+        hoverEffect.Visible = true
+        hoverEffect.BackgroundTransparency = 0.7
+        
+        local stroke = button:FindFirstChild("UIStroke")
+        if stroke then
+            stroke.Thickness = 3
+            stroke.Transparency = 0.2
+        end
+    end
+end
+
+-- Window dragging
+local dragging = false
+local dragInput, dragStart, startPos
+
+local function update(input)
+    local delta = input.Position - dragStart
+    mainWindow.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+end
+
+topBar.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = true
+        dragStart = input.Position
+        startPos = mainWindow.Position
+        
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
+    end
+end)
+
+topBar.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement then
+        dragInput = input
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if input == dragInput and dragging then
+        update(input)
+    end
+end)
+
+-- Close button
+local closeButton = Instance.new("TextButton")
+closeButton.Name = "CloseButton"
+closeButton.Parent = topBar
+closeButton.Size = UDim2.new(0, 35, 0, 35)
+closeButton.Position = UDim2.new(1, -40, 0.5, -17.5)
+closeButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+closeButton.BackgroundTransparency = 0.3
+closeButton.Text = "X"
+closeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+closeButton.TextSize = 16
+closeButton.Font = Enum.Font.GothamBold
+closeButton.BorderSizePixel = 0
+closeButton.ZIndex = 5
+
+local closeCorner = Instance.new("UICorner")
+closeCorner.Parent = closeButton
+
+-- Menu toggle function
+local function ToggleMenu()
+    if screenGui.Enabled then
+        local closeTween = TweenService:Create(mainWindow, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
+            Position = UDim2.new(0.5, 0, 0.4, 0),
+            BackgroundTransparency = 1,
+            Size = UDim2.new(0, 0, 0, 0)
+        })
+        closeTween:Play()
+        closeTween.Completed:Wait()
+        screenGui.Enabled = false
+    else
+        screenGui.Enabled = true
+        mainWindow.Position = UDim2.new(0.5, 0, 0.4, 0)
+        mainWindow.BackgroundTransparency = 1
+        mainWindow.Size = UDim2.new(0, 0, 0, 0)
+        
+        local openTween = TweenService:Create(mainWindow, TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+            Position = UDim2.new(0.5, 0, 0.5, 0),
+            BackgroundTransparency = currentTransparency,
+            Size = UDim2.new(0, 650, 0, 500)
+        })
+        openTween:Play()
+    end
+end
+
+closeButton.MouseButton1Click:Connect(ToggleMenu)
+
+-- Bind handler (fixed to not toggle menu when changing bind)
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if changingBind then return end
+    
+    if input.KeyCode == currentBind then
+        ToggleMenu()
+    end
+end)
+
+-- Bind info
+local bindInfo = Instance.new("TextLabel")
+bindInfo.Name = "BindInfo"
+bindInfo.Parent = topBar
+bindInfo.Size = UDim2.new(0, 150, 0, 20)
+bindInfo.Position = UDim2.new(0, 10, 1, -25)
+bindInfo.BackgroundTransparency = 1
+bindInfo.Text = "Bind: " .. tostring(currentBind):gsub("Enum.KeyCode.", "")
+bindInfo.TextColor3 = Color3.fromRGB(0, 180, 255)
+bindInfo.TextSize = 12
+bindInfo.Font = Enum.Font.Gotham
+bindInfo.TextXAlignment = Enum.TextXAlignment.Left
+bindInfo.ZIndex = 5
+
+-- Safe return
+local menuModule = {
+    ToggleMenu = ToggleMenu,
+    OpenMenu = function() 
+        if not screenGui.Enabled then 
+            ToggleMenu() 
+        end 
+    end,
+    CloseMenu = function() 
+        if screenGui.Enabled then 
+            ToggleMenu() 
+        end 
+    end
+}
+
+-- Initialize only if player exists
+if player then
+    initializeCharacter()
+end
+
+return menuModule

@@ -264,6 +264,13 @@ local currentTab = "RAGE"
 local bindConnection = nil
 local changingBind = false
 
+-- API для внешних скриптов
+local NeverloseAPI = {
+    Tabs = {},
+    Elements = {},
+    Callbacks = {}
+}
+
 -- Theme update functions
 local function UpdateTheme(color)
     currentThemeColor = color
@@ -365,6 +372,33 @@ local function CreateToggleSetting(parent, name, initialValue, callback)
     end)
     
     return setting
+end
+
+local function CreateButton(parent, name, callback)
+    local button = Instance.new("TextButton")
+    button.Name = name .. "Button"
+    button.Parent = parent
+    button.Size = UDim2.new(0.9, 0, 0, 40)
+    button.BackgroundColor3 = Color3.fromRGB(0, 100, 200)
+    button.BackgroundTransparency = 0.4
+    button.Text = name
+    button.TextColor3 = Color3.fromRGB(255, 255, 255)
+    button.TextSize = 14
+    button.Font = Enum.Font.GothamBold
+    button.BorderSizePixel = 0
+    button.ZIndex = 4
+    
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 6)
+    corner.Parent = button
+    
+    button.MouseButton1Click:Connect(function()
+        if callback then
+            callback()
+        end
+    end)
+    
+    return button
 end
 
 local function CreateColorPicker(parent, name, initialColor, callback)
@@ -555,6 +589,115 @@ local function CreateSlider(parent, name, min, max, initialValue, valueFormat, c
     return setting
 end
 
+-- API Functions
+function NeverloseAPI:CreateTab(tabName)
+    if self.Tabs[tabName] then
+        return self.Tabs[tabName]
+    end
+    
+    local tab = {
+        Name = tabName,
+        Elements = {}
+    }
+    
+    self.Tabs[tabName] = tab
+    return tab
+end
+
+function NeverloseAPI:AddButton(tabName, buttonName, callback)
+    if not self.Tabs[tabName] then
+        self:CreateTab(tabName)
+    end
+    
+    local tab = self.Tabs[tabName]
+    tab.Elements[buttonName] = {
+        Type = "Button",
+        Callback = callback
+    }
+    
+    return true
+end
+
+function NeverloseAPI:AddToggle(tabName, toggleName, defaultValue, callback)
+    if not self.Tabs[tabName] then
+        self:CreateTab(tabName)
+    end
+    
+    local tab = self.Tabs[tabName]
+    tab.Elements[toggleName] = {
+        Type = "Toggle",
+        Default = defaultValue,
+        Callback = callback
+    }
+    
+    return true
+end
+
+function NeverloseAPI:AddSlider(tabName, sliderName, min, max, defaultValue, valueFormat, callback)
+    if not self.Tabs[tabName] then
+        self:CreateTab(tabName)
+    end
+    
+    local tab = self.Tabs[tabName]
+    tab.Elements[sliderName] = {
+        Type = "Slider",
+        Min = min,
+        Max = max,
+        Default = defaultValue,
+        ValueFormat = valueFormat,
+        Callback = callback
+    }
+    
+    return true
+end
+
+function NeverloseAPI:AddColorPicker(tabName, colorName, defaultColor, callback)
+    if not self.Tabs[tabName] then
+        self:CreateTab(tabName)
+    end
+    
+    local tab = self.Tabs[tabName]
+    tab.Elements[colorName] = {
+        Type = "ColorPicker",
+        DefaultColor = defaultColor,
+        Callback = callback
+    }
+    
+    return true
+end
+
+function NeverloseAPI:GetTab(tabName)
+    return self.Tabs[tabName]
+end
+
+function NeverloseAPI:RemoveElement(tabName, elementName)
+    if self.Tabs[tabName] and self.Tabs[tabName].Elements[elementName] then
+        self.Tabs[tabName].Elements[elementName] = nil
+        return true
+    end
+    return false
+end
+
+function NeverloseAPI:GetConfiguration()
+    return {
+        OpenCloseBind = currentBind,
+        ThemeColor = currentThemeColor,
+        Transparency = currentTransparency
+    }
+end
+
+function NeverloseAPI:SetConfiguration(config)
+    if config.OpenCloseBind then
+        currentBind = config.OpenCloseBind
+    end
+    if config.ThemeColor then
+        UpdateTheme(config.ThemeColor)
+    end
+    if config.Transparency then
+        UpdateTransparency(config.Transparency)
+    end
+end
+
 -- Function to create tab content
 local function CreateTabContent(tabName)
     local contentFrame = Instance.new("Frame")
@@ -615,6 +758,22 @@ local function CreateTabContent(tabName)
     settingsLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
         settingsContainer.CanvasSize = UDim2.new(0, 0, 0, settingsLayout.AbsoluteContentSize.Y + 20)
     end)
+    
+    -- Create elements from API if they exist
+    if NeverloseAPI.Tabs[tabName] then
+        for elementName, elementData in pairs(NeverloseAPI.Tabs[tabName].Elements) do
+            if elementData.Type == "Button" then
+                CreateButton(settingsContainer, elementName, elementData.Callback)
+            elseif elementData.Type == "Toggle" then
+                CreateToggleSetting(settingsContainer, elementName, elementData.Default, elementData.Callback)
+            elseif elementData.Type == "Slider" then
+                CreateSlider(settingsContainer, elementName, elementData.Min, elementData.Max, 
+                    elementData.Default, elementData.ValueFormat, elementData.Callback)
+            elseif elementData.Type == "ColorPicker" then
+                CreateColorPicker(settingsContainer, elementName, elementData.DefaultColor, elementData.Callback)
+            end
+        end
+    end
     
     if tabName == "SETTINGS" then
         -- Theme color setting
@@ -1205,7 +1364,7 @@ bindInfo.Font = Enum.Font.Gotham
 bindInfo.TextXAlignment = Enum.TextXAlignment.Left
 bindInfo.ZIndex = 5
 
--- Safe return
+-- Safe return with API
 local menuModule = {
     ToggleMenu = ToggleMenu,
     OpenMenu = function() 
@@ -1217,6 +1376,32 @@ local menuModule = {
         if screenGui.Enabled then 
             ToggleMenu() 
         end 
+    end,
+    
+    -- API для внешних скриптов
+    API = NeverloseAPI,
+    
+    -- Доступ к модулям
+    Animation = AnimationModule,
+    
+    -- Функции для обновления UI
+    UpdateTheme = UpdateTheme,
+    UpdateTransparency = UpdateTransparency,
+    
+    -- Получить текущие настройки
+    GetSettings = function()
+        return {
+            Bind = currentBind,
+            ThemeColor = currentThemeColor,
+            Transparency = currentTransparency
+        }
+    end,
+    
+    -- Обновить настройки
+    SetSettings = function(settings)
+        if settings.Bind then currentBind = settings.Bind end
+        if settings.ThemeColor then UpdateTheme(settings.ThemeColor) end
+        if settings.Transparency then UpdateTransparency(settings.Transparency) end
     end
 }
 

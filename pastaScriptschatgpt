@@ -1,4 +1,4 @@
--- [[ HVH OBKAK | ULTIMATE EDITION ]] --
+-- [[ HVH OBKAK | ULTIMATE EDITION (ESP STABILITY FIX) ]] --
 
 local UserInputService = game:GetService("UserInputService")
 local CoreGui = game:GetService("CoreGui")
@@ -18,7 +18,7 @@ local Settings = {
     CurrentPartIndex = 1,
     AimbotTeamCheck = false,
     AimbotWallCheck = true,
-    FIRE_RATE = 1.5, -- Твоё КД
+    FIRE_RATE = 1.5,
     LastShotTime = 0,
     isSnapped = false,
     snapOffset = CFrame.new(),
@@ -33,7 +33,7 @@ local Settings = {
 }
 
 local PriorityParts = {"Head", "UpperTorso", "LowerTorso", "LeftUpperArm", "RightUpperArm", "LeftUpperLeg", "RightUpperLeg"}
-local ESP_DATA = {}
+local ESP_CACHE = {}
 
 -- [[ ОЧИСТКА ]] --
 if CoreGui:FindFirstChild("HVH_OBKAK_Menu") then CoreGui.HVH_OBKAK_Menu:Destroy() end
@@ -67,16 +67,13 @@ Inner.Size = UDim2.new(1, -6, 1, -6)
 Inner.Position = UDim2.new(0, 3, 0, 3)
 Inner.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
 
--- [[ ВОТ ОНА, НАДПИСЬ ]] --
 local Title = Instance.new("TextLabel", Inner)
 Title.Text = "HVH OBKAK | ultimate"
 Title.Size = UDim2.new(1, -20, 0, 35)
 Title.Position = UDim2.new(0, 10, 0, 0)
 Title.TextColor3 = Color3.fromRGB(230, 230, 230)
-Title.TextSize = 16
-Title.Font = Enum.Font.SourceSansBold
-Title.TextXAlignment = 0
-Title.BackgroundTransparency = 1
+Title.TextSize = 16; Title.Font = Enum.Font.SourceSansBold
+Title.TextXAlignment = 0; Title.BackgroundTransparency = 1
 
 local TabBar = Instance.new("Frame", Inner)
 TabBar.Size = UDim2.new(1, -16, 0, 40)
@@ -89,7 +86,7 @@ Pages.Size = UDim2.new(1, -16, 1, -95)
 Pages.Position = UDim2.new(0, 8, 0, 85)
 Pages.BackgroundTransparency = 1
 
--- Функции создания элементов (Toggle, Slider, Tab)
+-- Хелперы UI
 local function CreateToggle(parent, text, default, callback)
     local btn = Instance.new("TextButton", parent)
     btn.Size = UDim2.new(1, 0, 0, 28); btn.BackgroundTransparency = 1
@@ -139,10 +136,9 @@ end
 
 local aimPage = CreateTab("Aimbot")
 local espPage = CreateTab("Visuals")
-CreateTab("Rage")
-CreateTab("Misc")
+CreateTab("Rage"); CreateTab("Misc")
 
--- [[ ЭЛЕМЕНТЫ УПРАВЛЕНИЯ ]] --
+-- [[ ЗАПОЛНЕНИЕ UI ]] --
 CreateToggle(aimPage, "Aimbot Enabled", Settings.AimbotEnabled, function(v) Settings.AimbotEnabled = v; circle.Visible = v end)
 CreateToggle(aimPage, "Auto Fire", Settings.AutoFire, function(v) Settings.AutoFire = v end)
 local HitboxBtn = Instance.new("TextButton", aimPage)
@@ -159,11 +155,75 @@ CreateSlider(aimPage, "Fire Rate (sec)", 0.1, 5, Settings.FIRE_RATE, function(v)
 
 CreateToggle(espPage, "ESP Master", Settings.ESPEnabled, function(v) Settings.ESPEnabled = v end)
 CreateToggle(espPage, "Show Names", Settings.ShowNames, function(v) Settings.ShowNames = v end)
+CreateToggle(espPage, "Show Health", Settings.ShowHealth, function(v) Settings.ShowHealth = v end)
 CreateToggle(espPage, "Show Chams", Settings.ShowChams, function(v) Settings.ShowChams = v end)
 CreateToggle(espPage, "Team Check", Settings.ESPTeamCheck, function(v) Settings.ESPTeamCheck = v end)
 CreateSlider(espPage, "Max Distance", 100, 5000, Settings.MaxDistance, function(v) Settings.MaxDistance = v end)
 
--- [[ ЛОГИКА ]] --
+-- [[ ЛОГИКА ESP ]] --
+local function GetESPData(player)
+    if not ESP_CACHE[player] then
+        ESP_CACHE[player] = {
+            Name = Drawing.new("Text"),
+            Health = Drawing.new("Text")
+        }
+    end
+    return ESP_CACHE[player]
+end
+
+local function CleanESP(player)
+    if ESP_CACHE[player] then
+        ESP_CACHE[player].Name.Visible = false
+        ESP_CACHE[player].Health.Visible = false
+    end
+end
+
+local function UpdateESP()
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p == LocalPlayer then continue end
+        local data = GetESPData(p)
+        local char = p.Character
+        local head = char and char:FindFirstChild("Head")
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+
+        if Settings.ESPEnabled and head and hum and hum.Health > 0 then
+            local isTeam = (p.Team == LocalPlayer.Team)
+            if Settings.ESPTeamCheck and isTeam then
+                CleanESP(p)
+                if char:FindFirstChild("OBKAK_Highlight") then char.OBKAK_Highlight.Enabled = false end
+                continue
+            end
+
+            local pos, onScreen = Camera:WorldToViewportPoint(head.Position)
+            local dist = (Camera.CFrame.Position - head.Position).Magnitude
+
+            if onScreen and dist <= Settings.MaxDistance then
+                local color = isTeam and Color3.new(0,1,0) or Color3.new(1,0,0)
+                
+                -- Имена
+                if Settings.ShowNames then
+                    data.Name.Text = p.Name; data.Name.Position = Vector2.new(pos.X, pos.Y - 30); data.Name.Color = color; data.Name.Visible = true; data.Name.Outline = true; data.Name.Size = 14
+                else data.Name.Visible = false end
+
+                -- Здоровье
+                if Settings.ShowHealth then
+                    data.Health.Text = "❤ " .. math.floor(hum.Health); data.Health.Position = Vector2.new(pos.X, pos.Y - 15); data.Health.Color = Color3.fromHSV(math.clamp(hum.Health/hum.MaxHealth, 0, 1) * 0.3, 1, 1); data.Health.Visible = true; data.Health.Outline = true; data.Health.Size = 13
+                else data.Health.Visible = false end
+
+                -- Чамсы (Highlight)
+                if Settings.ShowChams then
+                    local h = char:FindFirstChild("OBKAK_Highlight") or Instance.new("Highlight", char)
+                    h.Name = "OBKAK_Highlight"; h.Enabled = true; h.FillColor = color; h.FillTransparency = Settings.ChamsTransparency; h.OutlineColor = Color3.new(1,1,1)
+                elseif char:FindFirstChild("OBKAK_Highlight") then char.OBKAK_Highlight.Enabled = false end
+            else CleanESP(p) end
+        else
+            CleanESP(p)
+            if char and char:FindFirstChild("OBKAK_Highlight") then char.OBKAK_Highlight.Enabled = false end
+        end
+    end
+end
+
+-- [[ ЛОГИКА AIM ]] --
 local function IsVisible(part, character)
     if not Settings.AimbotWallCheck then return true end
     local params = RaycastParams.new()
@@ -188,27 +248,12 @@ local function getBestPart(character)
 end
 
 RunService.RenderStepped:Connect(function()
-    for _, p in ipairs(Players:GetPlayers()) do
-        if p == LocalPlayer then continue end
-        local char = p.Character
-        local hum = char and char:FindFirstChildOfClass("Humanoid")
-        if char and hum and hum.Health > 0 and Settings.ESPEnabled then
-            local isTeam = (p.Team == LocalPlayer.Team)
-            if Settings.ESPTeamCheck and isTeam then 
-                if char:FindFirstChild("OBKAK_Highlight") then char.OBKAK_Highlight.Enabled = false end
-            else
-                if Settings.ShowChams then
-                    local h = char:FindFirstChild("OBKAK_Highlight") or Instance.new("Highlight", char)
-                    h.Enabled = true; h.FillColor = isTeam and Color3.new(0,1,0) or Color3.new(1,0,0)
-                    h.FillTransparency = Settings.ChamsTransparency
-                end
-            end
-        elseif char and char:FindFirstChild("OBKAK_Highlight") then char.OBKAK_Highlight.Enabled = false end
-    end
+    UpdateESP()
 
     if not Settings.AimbotEnabled then return end
     circle.Size = UDim2.new(0, Settings.FOV_RADIUS * 2, 0, Settings.FOV_RADIUS * 2)
     local target, minDist = nil, Settings.FOV_RADIUS
+
     for _, p in ipairs(Players:GetPlayers()) do
         if p ~= LocalPlayer and p.Character then
             local hum = p.Character:FindFirstChildOfClass("Humanoid")
@@ -226,6 +271,7 @@ RunService.RenderStepped:Connect(function()
         end
     end
 
+    -- Silent Aim
     if UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) and target then
         if not Settings.isSnapped then
             local tCF = CFrame.new(Camera.CFrame.Position, target.Position)
@@ -237,6 +283,7 @@ RunService.RenderStepped:Connect(function()
         end
     else Settings.isSnapped = false end
 
+    -- Auto Fire
     if Settings.AutoFire and target and (tick() - Settings.LastShotTime >= Settings.FIRE_RATE) then
         Settings.LastShotTime = tick()
         local old = Camera.CFrame
@@ -249,7 +296,7 @@ RunService.RenderStepped:Connect(function()
     stroke.Color = target and Color3.new(0,1,0) or Color3.new(0,1,1)
 end)
 
--- Драг и кнопка Insert
+-- Драг и Insert
 local dragStart, startPos, dragging
 MainFrame.InputBegan:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = true; dragStart = input.Position; startPos = MainFrame.Position end end)
 UserInputService.InputChanged:Connect(function(input) if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then

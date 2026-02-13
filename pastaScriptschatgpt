@@ -1,4 +1,4 @@
--- [[ HVH OBKAK | ULTIMATE EDITION (ESP STABILITY FIX) ]] --
+-- [[ HVH OBKAK | ULTIMATE EDITION (GHOST ESP FIX) ]] --
 
 local UserInputService = game:GetService("UserInputService")
 local CoreGui = game:GetService("CoreGui")
@@ -35,7 +35,18 @@ local Settings = {
 local PriorityParts = {"Head", "UpperTorso", "LowerTorso", "LeftUpperArm", "RightUpperArm", "LeftUpperLeg", "RightUpperLeg"}
 local ESP_CACHE = {}
 
--- [[ ОЧИСТКА ]] --
+-- [[ ФУНКЦИЯ УДАЛЕНИЯ ПРИ ВЫХОДЕ ]] --
+local function RemoveESP(player)
+    if ESP_CACHE[player] then
+        if ESP_CACHE[player].Name then ESP_CACHE[player].Name:Remove() end
+        if ESP_CACHE[player].Health then ESP_CACHE[player].Health:Remove() end
+        ESP_CACHE[player] = nil
+    end
+end
+
+Players.PlayerRemoving:Connect(RemoveESP)
+
+-- [[ ОЧИСТКА СТАРОГО ]] --
 if CoreGui:FindFirstChild("HVH_OBKAK_Menu") then CoreGui.HVH_OBKAK_Menu:Destroy() end
 if CoreGui:FindFirstChild("SilentGui") then CoreGui.SilentGui:Destroy() end
 
@@ -43,7 +54,7 @@ local ScreenGui = Instance.new("ScreenGui", CoreGui)
 ScreenGui.Name = "HVH_OBKAK_Menu"
 ScreenGui.ResetOnSpawn = false
 
--- [[ FOV КРУГ ]] --
+-- [[ FOV ]] --
 local fovGui = Instance.new("ScreenGui", CoreGui)
 fovGui.Name = "SilentGui"
 local circle = Instance.new("Frame", fovGui)
@@ -86,7 +97,6 @@ Pages.Size = UDim2.new(1, -16, 1, -95)
 Pages.Position = UDim2.new(0, 8, 0, 85)
 Pages.BackgroundTransparency = 1
 
--- Хелперы UI
 local function CreateToggle(parent, text, default, callback)
     local btn = Instance.new("TextButton", parent)
     btn.Size = UDim2.new(1, 0, 0, 28); btn.BackgroundTransparency = 1
@@ -138,7 +148,7 @@ local aimPage = CreateTab("Aimbot")
 local espPage = CreateTab("Visuals")
 CreateTab("Rage"); CreateTab("Misc")
 
--- [[ ЗАПОЛНЕНИЕ UI ]] --
+-- [[ CONTENT ]] --
 CreateToggle(aimPage, "Aimbot Enabled", Settings.AimbotEnabled, function(v) Settings.AimbotEnabled = v; circle.Visible = v end)
 CreateToggle(aimPage, "Auto Fire", Settings.AutoFire, function(v) Settings.AutoFire = v end)
 local HitboxBtn = Instance.new("TextButton", aimPage)
@@ -171,25 +181,18 @@ local function GetESPData(player)
     return ESP_CACHE[player]
 end
 
-local function CleanESP(player)
-    if ESP_CACHE[player] then
-        ESP_CACHE[player].Name.Visible = false
-        ESP_CACHE[player].Health.Visible = false
-    end
-end
-
 local function UpdateESP()
     for _, p in ipairs(Players:GetPlayers()) do
         if p == LocalPlayer then continue end
-        local data = GetESPData(p)
         local char = p.Character
         local head = char and char:FindFirstChild("Head")
         local hum = char and char:FindFirstChildOfClass("Humanoid")
+        local data = GetESPData(p)
 
         if Settings.ESPEnabled and head and hum and hum.Health > 0 then
             local isTeam = (p.Team == LocalPlayer.Team)
             if Settings.ESPTeamCheck and isTeam then
-                CleanESP(p)
+                data.Name.Visible = false; data.Health.Visible = false
                 if char:FindFirstChild("OBKAK_Highlight") then char.OBKAK_Highlight.Enabled = false end
                 continue
             end
@@ -200,24 +203,21 @@ local function UpdateESP()
             if onScreen and dist <= Settings.MaxDistance then
                 local color = isTeam and Color3.new(0,1,0) or Color3.new(1,0,0)
                 
-                -- Имена
                 if Settings.ShowNames then
                     data.Name.Text = p.Name; data.Name.Position = Vector2.new(pos.X, pos.Y - 30); data.Name.Color = color; data.Name.Visible = true; data.Name.Outline = true; data.Name.Size = 14
                 else data.Name.Visible = false end
 
-                -- Здоровье
                 if Settings.ShowHealth then
-                    data.Health.Text = "❤ " .. math.floor(hum.Health); data.Health.Position = Vector2.new(pos.X, pos.Y - 15); data.Health.Color = Color3.fromHSV(math.clamp(hum.Health/hum.MaxHealth, 0, 1) * 0.3, 1, 1); data.Health.Visible = true; data.Health.Outline = true; data.Health.Size = 13
+                    data.Health.Text = "HP: " .. math.floor(hum.Health); data.Health.Position = Vector2.new(pos.X, pos.Y - 15); data.Health.Color = Color3.new(1,1,1); data.Health.Visible = true; data.Health.Outline = true; data.Health.Size = 13
                 else data.Health.Visible = false end
 
-                -- Чамсы (Highlight)
                 if Settings.ShowChams then
                     local h = char:FindFirstChild("OBKAK_Highlight") or Instance.new("Highlight", char)
-                    h.Name = "OBKAK_Highlight"; h.Enabled = true; h.FillColor = color; h.FillTransparency = Settings.ChamsTransparency; h.OutlineColor = Color3.new(1,1,1)
+                    h.Name = "OBKAK_Highlight"; h.Enabled = true; h.FillColor = color; h.FillTransparency = Settings.ChamsTransparency
                 elseif char:FindFirstChild("OBKAK_Highlight") then char.OBKAK_Highlight.Enabled = false end
-            else CleanESP(p) end
+            else data.Name.Visible = false; data.Health.Visible = false end
         else
-            CleanESP(p)
+            data.Name.Visible = false; data.Health.Visible = false
             if char and char:FindFirstChild("OBKAK_Highlight") then char.OBKAK_Highlight.Enabled = false end
         end
     end
@@ -271,7 +271,6 @@ RunService.RenderStepped:Connect(function()
         end
     end
 
-    -- Silent Aim
     if UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) and target then
         if not Settings.isSnapped then
             local tCF = CFrame.new(Camera.CFrame.Position, target.Position)
@@ -283,7 +282,6 @@ RunService.RenderStepped:Connect(function()
         end
     else Settings.isSnapped = false end
 
-    -- Auto Fire
     if Settings.AutoFire and target and (tick() - Settings.LastShotTime >= Settings.FIRE_RATE) then
         Settings.LastShotTime = tick()
         local old = Camera.CFrame

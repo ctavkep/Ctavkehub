@@ -1,223 +1,152 @@
--- HVH OBKAK ULTIMATE UI + SILENT AIM + ESP
+-- [[ HVH OBKAK | ULTIMATE EDITION ]] --
+
 local UserInputService = game:GetService("UserInputService")
 local CoreGui = game:GetService("CoreGui")
-local TweenService = game:GetService("TweenService")
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 
 local LocalPlayer = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
 
--- [[ ОБЩИЕ НАСТРОЙКИ ]] --
+-- [[ НАСТРОЙКИ ]] --
 local Settings = {
-    -- Aimbot
     AimbotEnabled = false,
     AutoFire = true,
     FOV_RADIUS = 150,
     TARGET_PART = "Head",
-    TARGET_LIST = {"Head", "UpperTorso", "LowerTorso", "HumanoidRootPart", "Random"},
+    TARGET_LIST = {"Head", "UpperTorso", "LowerTorso", "HumanoidRootPart", "Random", "All"},
     CurrentPartIndex = 1,
     AimbotTeamCheck = false,
     AimbotWallCheck = true,
-    FIRE_RATE = 1.5,
+    FIRE_RATE = 1.5, -- Твоё КД
     LastShotTime = 0,
     isSnapped = false,
     snapOffset = CFrame.new(),
     
-    -- ESP
     ESPEnabled = false,
     ShowNames = true,
     ShowHealth = true,
     ShowChams = true,
-    OnlyEnemies = false,
     ESPTeamCheck = true,
-    MaxDistance = 1000,
-    ChamsTransparency = 0.6
+    MaxDistance = 1500,
+    ChamsTransparency = 0.5
 }
 
--- Таблицы для ESP
+local PriorityParts = {"Head", "UpperTorso", "LowerTorso", "LeftUpperArm", "RightUpperArm", "LeftUpperLeg", "RightUpperLeg"}
 local ESP_DATA = {}
-local CHAMS_DATA = {}
 
--- Чистка
+-- [[ ОЧИСТКА ]] --
 if CoreGui:FindFirstChild("HVH_OBKAK_Menu") then CoreGui.HVH_OBKAK_Menu:Destroy() end
 if CoreGui:FindFirstChild("SilentGui") then CoreGui.SilentGui:Destroy() end
 
-local ScreenGui = Instance.new("ScreenGui")
+local ScreenGui = Instance.new("ScreenGui", CoreGui)
 ScreenGui.Name = "HVH_OBKAK_Menu"
-ScreenGui.Parent = CoreGui
+ScreenGui.ResetOnSpawn = false
 
 -- [[ FOV КРУГ ]] --
 local fovGui = Instance.new("ScreenGui", CoreGui)
 fovGui.Name = "SilentGui"
 local circle = Instance.new("Frame", fovGui)
-circle.Name = "Circle"
 circle.Size = UDim2.new(0, Settings.FOV_RADIUS * 2, 0, Settings.FOV_RADIUS * 2)
 circle.AnchorPoint = Vector2.new(0.5, 0.5)
 circle.Position = UDim2.new(0.5, 0, 0.5, 0)
 circle.BackgroundTransparency = 1
 circle.Visible = false
-
-local corner = Instance.new("UICorner", circle)
-corner.CornerRadius = UDim.new(1, 0)
 local stroke = Instance.new("UIStroke", circle)
 stroke.Color = Color3.fromRGB(0, 255, 255)
-stroke.Thickness = 1
+Instance.new("UICorner", circle).CornerRadius = UDim.new(1, 0)
 
 -- [[ UI ]] --
-local MainFrame = Instance.new("Frame")
-MainFrame.Name = "MainFrame"
+local MainFrame = Instance.new("Frame", ScreenGui)
 MainFrame.Size = UDim2.new(0, 620, 0, 420)
 MainFrame.Position = UDim2.new(0.5, -310, 0.5, -210)
 MainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
-MainFrame.Parent = ScreenGui
 
-local Inner = Instance.new("Frame")
+local Inner = Instance.new("Frame", MainFrame)
 Inner.Size = UDim2.new(1, -6, 1, -6)
 Inner.Position = UDim2.new(0, 3, 0, 3)
 Inner.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
-Inner.Parent = MainFrame
 
-local TitleContainer = Instance.new("Frame")
-TitleContainer.Size = UDim2.new(1, 0, 0, 35)
-TitleContainer.BackgroundTransparency = 1
-TitleContainer.Parent = Inner
-
-local Title = Instance.new("TextLabel")
+-- [[ ВОТ ОНА, НАДПИСЬ ]] --
+local Title = Instance.new("TextLabel", Inner)
 Title.Text = "HVH OBKAK | ultimate"
-Title.Size = UDim2.new(1, -20, 1, 0)
+Title.Size = UDim2.new(1, -20, 0, 35)
 Title.Position = UDim2.new(0, 10, 0, 0)
 Title.TextColor3 = Color3.fromRGB(230, 230, 230)
 Title.TextSize = 16
 Title.Font = Enum.Font.SourceSansBold
-Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.TextXAlignment = 0
 Title.BackgroundTransparency = 1
-Title.Parent = TitleContainer
 
-local TabBar = Instance.new("Frame")
+local TabBar = Instance.new("Frame", Inner)
 TabBar.Size = UDim2.new(1, -16, 0, 40)
 TabBar.Position = UDim2.new(0, 8, 0, 35)
 TabBar.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-TabBar.Parent = Inner
+Instance.new("UIListLayout", TabBar).FillDirection = Enum.FillDirection.Horizontal
 
-local TabList = Instance.new("UIListLayout")
-TabList.FillDirection = Enum.FillDirection.Horizontal
-TabList.Parent = TabBar
-
-local Pages = Instance.new("Frame")
+local Pages = Instance.new("Frame", Inner)
 Pages.Size = UDim2.new(1, -16, 1, -95)
 Pages.Position = UDim2.new(0, 8, 0, 85)
 Pages.BackgroundTransparency = 1
-Pages.Parent = Inner
 
--- [[ ХЕЛПЕРЫ UI ]] --
+-- Функции создания элементов (Toggle, Slider, Tab)
 local function CreateToggle(parent, text, default, callback)
-    local ToggleBtn = Instance.new("TextButton")
-    ToggleBtn.Size = UDim2.new(1, 0, 0, 26)
-    ToggleBtn.BackgroundTransparency = 1
-    ToggleBtn.Text = "  [ " .. (default and "X" or " ") .. " ] " .. text
-    ToggleBtn.TextColor3 = default and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(150, 150, 150)
-    ToggleBtn.TextSize = 14
-    ToggleBtn.Font = Enum.Font.SourceSans
-    ToggleBtn.TextXAlignment = Enum.TextXAlignment.Left
-    ToggleBtn.Parent = parent
-
-    local state = default
-    ToggleBtn.MouseButton1Click:Connect(function()
-        state = not state
-        ToggleBtn.Text = "  [ " .. (state and "X" or " ") .. " ] " .. text
-        ToggleBtn.TextColor3 = state and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(150, 150, 150)
-        callback(state)
+    local btn = Instance.new("TextButton", parent)
+    btn.Size = UDim2.new(1, 0, 0, 28); btn.BackgroundTransparency = 1
+    btn.Text = "  [ " .. (default and "X" or " ") .. " ] " .. text
+    btn.TextColor3 = default and Color3.new(1,1,1) or Color3.new(0.6,0.6,0.6)
+    btn.TextSize = 14; btn.Font = 3; btn.TextXAlignment = 0
+    btn.MouseButton1Click:Connect(function()
+        default = not default
+        btn.Text = "  [ " .. (default and "X" or " ") .. " ] " .. text
+        btn.TextColor3 = default and Color3.new(1,1,1) or Color3.new(0.6,0.6,0.6)
+        callback(default)
     end)
 end
 
 local function CreateSlider(parent, text, min, max, default, callback)
-    local Container = Instance.new("Frame")
-    Container.Size = UDim2.new(1, 0, 0, 35)
-    Container.BackgroundTransparency = 1
-    Container.Parent = parent
-
-    local Label = Instance.new("TextLabel")
-    Label.Text = "  " .. text .. ": " .. default
-    Label.Size = UDim2.new(1, 0, 0, 16)
-    Label.TextColor3 = Color3.fromRGB(160, 160, 160)
-    Label.TextSize = 14
-    Label.Font = Enum.Font.SourceSans
-    Label.BackgroundTransparency = 1
-    Label.TextXAlignment = Enum.TextXAlignment.Left
-    Label.Parent = Container
-
-    local SliderBG = Instance.new("Frame")
-    SliderBG.Size = UDim2.new(0.7, 0, 0, 2)
-    SliderBG.Position = UDim2.new(0.05, 0, 0.75, 0)
-    SliderBG.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
-    SliderBG.Parent = Container
-
-    local Fill = Instance.new("Frame")
-    Fill.Size = UDim2.new((default - min) / (max - min), 0, 1, 0)
-    Fill.BackgroundColor3 = Color3.fromRGB(180, 180, 180)
-    Fill.BorderSizePixel = 0
-    Fill.Parent = SliderBG
-
-    local function update(input)
-        local pos = math.clamp((input.Position.X - SliderBG.AbsolutePosition.X) / SliderBG.AbsoluteSize.X, 0, 1)
-        local value = math.floor(min + (max - min) * pos)
-        Fill.Size = UDim2.new(pos, 0, 1, 0)
-        Label.Text = "  " .. text .. ": " .. value
-        callback(value)
-    end
-
+    local container = Instance.new("Frame", parent)
+    container.Size = UDim2.new(1, 0, 0, 35); container.BackgroundTransparency = 1
+    local label = Instance.new("TextLabel", container)
+    label.Text = "  " .. text .. ": " .. default; label.Size = UDim2.new(1,0,0,16); label.TextColor3 = Color3.new(0.6,0.6,0.6); label.TextSize = 14; label.BackgroundTransparency = 1; label.TextXAlignment = 0
+    local bg = Instance.new("Frame", container); bg.Size = UDim2.new(0.7,0,0,2); bg.Position = UDim2.new(0.05,0,0.75,0); bg.BackgroundColor3 = Color3.fromRGB(45,45,45)
+    local fill = Instance.new("Frame", bg); fill.Size = UDim2.new((default-min)/(max-min),0,1,0); fill.BackgroundColor3 = Color3.new(0.8,0.8,0.8); fill.BorderSizePixel = 0
     local dragging = false
-    SliderBG.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = true update(input) end
-    end)
-    UserInputService.InputChanged:Connect(function(input)
-        if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then update(input) end
-    end)
-    UserInputService.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end
-    end)
+    local function update(input)
+        local pos = math.clamp((input.Position.X - bg.AbsolutePosition.X) / bg.AbsoluteSize.X, 0, 1)
+        local val = min + (max-min)*pos
+        if max > 10 then val = math.floor(val) else val = math.floor(val * 10) / 10 end
+        fill.Size = UDim2.new(pos,0,1,0); label.Text = "  " .. text .. ": " .. val; callback(val)
+    end
+    bg.InputBegan:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = true update(input) end end)
+    UserInputService.InputChanged:Connect(function(input) if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then update(input) end end)
+    UserInputService.InputEnded:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end end)
 end
 
 local function CreateTab(name)
-    local TabBtn = Instance.new("TextButton")
-    TabBtn.Size = UDim2.new(1/6, 0, 1, 0)
-    TabBtn.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-    TabBtn.Text = name
-    TabBtn.TextColor3 = Color3.fromRGB(130, 130, 130)
-    TabBtn.Font = Enum.Font.SourceSansBold
-    TabBtn.TextSize = 18
-    TabBtn.Parent = TabBar
-
-    local Page = Instance.new("ScrollingFrame")
-    Page.Size = UDim2.new(1, 0, 1, 0)
-    Page.BackgroundTransparency = 1
-    Page.Visible = false
-    Page.ScrollBarThickness = 0
-    Page.AutomaticCanvasSize = Enum.AutomaticSize.Y
-    Page.Parent = Pages
-    Instance.new("UIListLayout", Page).Padding = UDim.new(0, 4)
-
-    TabBtn.MouseButton1Click:Connect(function()
-        for _, obj in pairs(Pages:GetChildren()) do if obj:IsA("ScrollingFrame") then obj.Visible = false end end
-        for _, obj in pairs(TabBar:GetChildren()) do if obj:IsA("TextButton") then obj.TextColor3 = Color3.fromRGB(130, 130, 130) end end
-        Page.Visible = true
-        TabBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    local btn = Instance.new("TextButton", TabBar)
+    btn.Size = UDim2.new(1/4, 0, 1, 0); btn.BackgroundColor3 = Color3.fromRGB(20,20,20); btn.Text = name; btn.TextColor3 = Color3.new(0.5,0.5,0.5); btn.Font = 4; btn.TextSize = 16
+    local page = Instance.new("ScrollingFrame", Pages)
+    page.Size = UDim2.new(1,0,1,0); page.Visible = false; page.BackgroundTransparency = 1; page.ScrollBarThickness = 0; page.AutomaticCanvasSize = 2
+    Instance.new("UIListLayout", page).Padding = UDim.new(0,4)
+    btn.MouseButton1Click:Connect(function()
+        for _,v in pairs(Pages:GetChildren()) do v.Visible = false end
+        for _,v in pairs(TabBar:GetChildren()) do if v:IsA("TextButton") then v.TextColor3 = Color3.new(0.5,0.5,0.5) end end
+        page.Visible = true; btn.TextColor3 = Color3.new(1,1,1)
     end)
-    return Page
+    return page
 end
 
--- Вкладки
 local aimPage = CreateTab("Aimbot")
 local espPage = CreateTab("Visuals")
-local ragePage = CreateTab("Rage")
-local miscPage = CreateTab("Misc")
+CreateTab("Rage")
+CreateTab("Misc")
 
--- [[ КОНТЕНТ AIMBOT ]] --
-CreateToggle(aimPage, "Enabled", Settings.AimbotEnabled, function(v) Settings.AimbotEnabled = v; circle.Visible = v end)
+-- [[ ЭЛЕМЕНТЫ УПРАВЛЕНИЯ ]] --
+CreateToggle(aimPage, "Aimbot Enabled", Settings.AimbotEnabled, function(v) Settings.AimbotEnabled = v; circle.Visible = v end)
 CreateToggle(aimPage, "Auto Fire", Settings.AutoFire, function(v) Settings.AutoFire = v end)
 local HitboxBtn = Instance.new("TextButton", aimPage)
-HitboxBtn.Size = UDim2.new(1, 0, 0, 26); HitboxBtn.BackgroundTransparency = 1; HitboxBtn.Text = "  [ Target Part ]: Head"; HitboxBtn.TextColor3 = Color3.fromRGB(200, 200, 200); HitboxBtn.TextSize = 14; HitboxBtn.TextXAlignment = 0
+HitboxBtn.Size = UDim2.new(1, 0, 0, 28); HitboxBtn.BackgroundTransparency = 1; HitboxBtn.Text = "  [ Target Part ]: Head"; HitboxBtn.TextColor3 = Color3.new(0.8,0.8,0.8); HitboxBtn.TextSize = 14; HitboxBtn.TextXAlignment = 0
 HitboxBtn.MouseButton1Click:Connect(function()
     Settings.CurrentPartIndex = Settings.CurrentPartIndex % #Settings.TARGET_LIST + 1
     Settings.TARGET_PART = Settings.TARGET_LIST[Settings.CurrentPartIndex]
@@ -225,170 +154,109 @@ HitboxBtn.MouseButton1Click:Connect(function()
 end)
 CreateToggle(aimPage, "Wall Check", Settings.AimbotWallCheck, function(v) Settings.AimbotWallCheck = v end)
 CreateToggle(aimPage, "Team Check", Settings.AimbotTeamCheck, function(v) Settings.AimbotTeamCheck = v end)
-CreateSlider(aimPage, "FOV Radius", 30, 500, Settings.FOV_RADIUS, function(v) Settings.FOV_RADIUS = v end)
+CreateSlider(aimPage, "FOV Radius", 30, 600, Settings.FOV_RADIUS, function(v) Settings.FOV_RADIUS = v end)
+CreateSlider(aimPage, "Fire Rate (sec)", 0.1, 5, Settings.FIRE_RATE, function(v) Settings.FIRE_RATE = v end)
 
--- [[ КОНТЕНТ ESP ]] --
-CreateToggle(espPage, "ESP Master Switch", Settings.ESPEnabled, function(v) Settings.ESPEnabled = v end)
+CreateToggle(espPage, "ESP Master", Settings.ESPEnabled, function(v) Settings.ESPEnabled = v end)
 CreateToggle(espPage, "Show Names", Settings.ShowNames, function(v) Settings.ShowNames = v end)
-CreateToggle(espPage, "Show Health", Settings.ShowHealth, function(v) Settings.ShowHealth = v end)
 CreateToggle(espPage, "Show Chams", Settings.ShowChams, function(v) Settings.ShowChams = v end)
 CreateToggle(espPage, "Team Check", Settings.ESPTeamCheck, function(v) Settings.ESPTeamCheck = v end)
-CreateToggle(espPage, "Only Enemies", Settings.OnlyEnemies, function(v) Settings.OnlyEnemies = v end)
 CreateSlider(espPage, "Max Distance", 100, 5000, Settings.MaxDistance, function(v) Settings.MaxDistance = v end)
 
--- [[ ЛОГИКА ESP ]] --
-local function IsEnemy(player)
-    if not Settings.ESPTeamCheck then return true end
-    return LocalPlayer.Team ~= player.Team
+-- [[ ЛОГИКА ]] --
+local function IsVisible(part, character)
+    if not Settings.AimbotWallCheck then return true end
+    local params = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    params.FilterDescendantsInstances = {LocalPlayer.Character, character, Camera}
+    local ray = workspace:Raycast(Camera.CFrame.Position, part.Position - Camera.CFrame.Position, params)
+    return (not ray) or (ray.Instance.Transparency > 0.4)
 end
 
-local function GetColor(player)
-    return IsEnemy(player) and Color3.fromRGB(255, 60, 60) or Color3.fromRGB(60, 255, 60)
-end
-
-local function RemoveESP(player)
-    if ESP_DATA[player] then
-        for _, obj in pairs(ESP_DATA[player]) do pcall(function() obj:Remove() end) end
-        ESP_DATA[player] = nil
+local function getBestPart(character)
+    if Settings.TARGET_PART ~= "All" then
+        local pName = Settings.TARGET_PART
+        if pName == "Random" then pName = PriorityParts[math.random(1, 3)] end
+        local p = character:FindFirstChild(pName)
+        return (p and IsVisible(p, character)) and p or nil
     end
-    if CHAMS_DATA[player] then pcall(function() CHAMS_DATA[player]:Destroy() end); CHAMS_DATA[player] = nil end
-end
-
-local function CreateESP(player)
-    if ESP_DATA[player] then return end
-    local name = Drawing.new("Text"); name.Center = true; name.Outline = true; name.Font = 2; name.Visible = false
-    local health = Drawing.new("Text"); health.Center = true; health.Outline = true; health.Font = 2; health.Visible = false
-    ESP_DATA[player] = {Name = name, Health = health}
-end
-
-local function CreateChams(player)
-    local char = player.Character
-    if not char then return end
-    local highlight = char:FindFirstChild("OBKAK_Highlight") or Instance.new("Highlight")
-    highlight.Name = "OBKAK_Highlight"
-    highlight.Adornee = char
-    highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-    highlight.FillTransparency = Settings.ChamsTransparency
-    highlight.Enabled = false
-    highlight.Parent = char
-    CHAMS_DATA[player] = highlight
-end
-
-local function UpdateESP()
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player == LocalPlayer then continue end
-        local data = ESP_DATA[player]
-        if not data then CreateESP(player); continue end
-
-        local char = player.Character
-        local head = char and char:FindFirstChild("Head")
-        local hum = char and char:FindFirstChildOfClass("Humanoid")
-
-        if Settings.ESPEnabled and head and hum and hum.Health > 0 and (not Settings.OnlyEnemies or IsEnemy(player)) then
-            local screenPos, onScreen = Camera:WorldToViewportPoint(head.Position)
-            local dist = (Camera.CFrame.Position - head.Position).Magnitude
-
-            if onScreen and dist <= Settings.MaxDistance then
-                local color = GetColor(player)
-                if Settings.ShowNames then
-                    data.Name.Text = player.Name; data.Name.Color = color; data.Name.Position = Vector2.new(screenPos.X, screenPos.Y - 30); data.Name.Visible = true; data.Name.Size = 14
-                else data.Name.Visible = false end
-
-                if Settings.ShowHealth then
-                    data.Health.Text = "❤ " .. math.floor(hum.Health); data.Health.Color = Color3.fromHSV(math.clamp(hum.Health/hum.MaxHealth, 0, 1) * 0.3, 1, 1); data.Health.Position = Vector2.new(screenPos.X, screenPos.Y - 15); data.Health.Visible = true; data.Health.Size = 12
-                else data.Health.Visible = false end
-
-                if Settings.ShowChams and char then
-                    if not CHAMS_DATA[player] then CreateChams(player) end
-                    local h = CHAMS_DATA[player]
-                    if h then h.Enabled = true; h.FillColor = color; h.OutlineColor = color end
-                elseif CHAMS_DATA[player] then CHAMS_DATA[player].Enabled = false end
-            else
-                data.Name.Visible = false; data.Health.Visible = false
-                if CHAMS_DATA[player] then CHAMS_DATA[player].Enabled = false end
-            end
-        else
-            data.Name.Visible = false; data.Health.Visible = false
-            if CHAMS_DATA[player] then CHAMS_DATA[player].Enabled = false end
-        end
+    for _, name in ipairs(PriorityParts) do
+        local p = character:FindFirstChild(name)
+        if p and IsVisible(p, character) then return p end
     end
+    return nil
 end
 
--- [[ ЛОГИКА AIMBOT ]] --
-local function getAimbotTarget()
-    local target, minDist = nil, Settings.FOV_RADIUS
-    local partName = Settings.TARGET_PART
-    if partName == "Random" then partName = ({"Head", "UpperTorso", "LowerTorso"})[math.random(1,3)] end
-
+RunService.RenderStepped:Connect(function()
     for _, p in ipairs(Players:GetPlayers()) do
-        if p ~= LocalPlayer and p.Character and p.Character:FindFirstChild(partName) then
-            if Settings.AimbotTeamCheck and p.Team == LocalPlayer.Team then continue end
-            local part = p.Character[partName]
-            local visible = true
-            if Settings.AimbotWallCheck then
-                local ray = workspace:Raycast(Camera.CFrame.Position, part.Position - Camera.CFrame.Position, RaycastParams.new())
-                if ray and not ray.Instance:IsDescendantOf(p.Character) then visible = false end
+        if p == LocalPlayer then continue end
+        local char = p.Character
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        if char and hum and hum.Health > 0 and Settings.ESPEnabled then
+            local isTeam = (p.Team == LocalPlayer.Team)
+            if Settings.ESPTeamCheck and isTeam then 
+                if char:FindFirstChild("OBKAK_Highlight") then char.OBKAK_Highlight.Enabled = false end
+            else
+                if Settings.ShowChams then
+                    local h = char:FindFirstChild("OBKAK_Highlight") or Instance.new("Highlight", char)
+                    h.Enabled = true; h.FillColor = isTeam and Color3.new(0,1,0) or Color3.new(1,0,0)
+                    h.FillTransparency = Settings.ChamsTransparency
+                end
             end
-            if visible then
-                local pos, onScreen = Camera:WorldToViewportPoint(part.Position)
-                if onScreen then
-                    local mag = (Vector2.new(pos.X, pos.Y) - Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)).Magnitude
-                    if mag < minDist then minDist = mag; target = part end
+        elseif char and char:FindFirstChild("OBKAK_Highlight") then char.OBKAK_Highlight.Enabled = false end
+    end
+
+    if not Settings.AimbotEnabled then return end
+    circle.Size = UDim2.new(0, Settings.FOV_RADIUS * 2, 0, Settings.FOV_RADIUS * 2)
+    local target, minDist = nil, Settings.FOV_RADIUS
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and p.Character then
+            local hum = p.Character:FindFirstChildOfClass("Humanoid")
+            if hum and hum.Health > 0 then
+                if Settings.AimbotTeamCheck and p.Team == LocalPlayer.Team then continue end
+                local part = getBestPart(p.Character)
+                if part then
+                    local pos, onScreen = Camera:WorldToViewportPoint(part.Position)
+                    if onScreen then
+                        local mag = (Vector2.new(pos.X, pos.Y) - Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)).Magnitude
+                        if mag < minDist then minDist = mag; target = part end
+                    end
                 end
             end
         end
     end
-    return target
-end
 
--- [[ ГЛАВНЫЙ ЦИКЛ ]] --
-RunService.RenderStepped:Connect(function()
-    UpdateESP()
-    
-    if Settings.AimbotEnabled then
-        circle.Size = UDim2.new(0, Settings.FOV_RADIUS * 2, 0, Settings.FOV_RADIUS * 2)
-        local target = getAimbotTarget()
-        local currentTime = tick()
-        
-        -- Silent Aim logic
-        if UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) and target then
-            if not Settings.isSnapped then
-                local targetCF = CFrame.new(Camera.CFrame.Position, target.Position)
-                Settings.snapOffset = targetCF:ToObjectSpace(Camera.CFrame)
-                Camera.CFrame = targetCF
-                Settings.isSnapped = true
-            else
-                Camera.CFrame = Camera.CFrame:ToWorldSpace(Settings.snapOffset)
-                Settings.isSnapped = false
-            end
-        else Settings.isSnapped = false end
-
-        -- Auto Fire
-        if Settings.AutoFire and target and (currentTime - Settings.LastShotTime >= Settings.FIRE_RATE) then
-            Settings.LastShotTime = currentTime
-            local oldCF = Camera.CFrame
-            Camera.CFrame = CFrame.new(Camera.CFrame.Position, target.Position)
-            if mouse1press then mouse1press(); task.wait(0.02); mouse1release()
-            else local t = LocalPlayer.Character:FindFirstChildOfClass("Tool"); if t then t:Activate() end end
-            task.defer(function() Camera.CFrame = oldCF end)
+    if UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) and target then
+        if not Settings.isSnapped then
+            local tCF = CFrame.new(Camera.CFrame.Position, target.Position)
+            Settings.snapOffset = tCF:ToObjectSpace(Camera.CFrame)
+            Camera.CFrame = tCF; Settings.isSnapped = true
+        else
+            Camera.CFrame = Camera.CFrame:ToWorldSpace(Settings.snapOffset)
+            Settings.isSnapped = false
         end
-        circle.UIStroke.Color = target and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(0, 255, 255)
+    else Settings.isSnapped = false end
+
+    if Settings.AutoFire and target and (tick() - Settings.LastShotTime >= Settings.FIRE_RATE) then
+        Settings.LastShotTime = tick()
+        local old = Camera.CFrame
+        Camera.CFrame = CFrame.new(Camera.CFrame.Position, target.Position)
+        if mouse1press then mouse1press(); task.wait(0.01); mouse1release() else
+            local t = LocalPlayer.Character:FindFirstChildOfClass("Tool"); if t then t:Activate() end
+        end
+        task.defer(function() Camera.CFrame = old end)
     end
+    stroke.Color = target and Color3.new(0,1,0) or Color3.new(0,1,1)
 end)
 
--- Драг и кнопки
-Players.PlayerRemoving:Connect(RemoveESP)
-aimPage.Visible = true; TabBar:GetChildren()[2].TextColor3 = Color3.fromRGB(255, 255, 255)
-
-local dragging, dragStart, startPos
-TitleContainer.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = true; dragStart = input.Position; startPos = MainFrame.Position end
-end)
-UserInputService.InputChanged:Connect(function(input)
-    if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
-        local delta = input.Position - dragStart
-        MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-    end
-end)
+-- Драг и кнопка Insert
+local dragStart, startPos, dragging
+MainFrame.InputBegan:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = true; dragStart = input.Position; startPos = MainFrame.Position end end)
+UserInputService.InputChanged:Connect(function(input) if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+    local delta = input.Position - dragStart
+    MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+end end)
 UserInputService.InputEnded:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end end)
-UserInputService.InputBegan:Connect(function(input, g) if not g and input.KeyCode == Enum.KeyCode.Insert then MainFrame.Visible = not MainFrame.Visible end end)
+UserInputService.InputBegan:Connect(function(input, gpe) if not gpe and input.KeyCode == Enum.KeyCode.Insert then MainFrame.Visible = not MainFrame.Visible end end)
+
+aimPage.Visible = true

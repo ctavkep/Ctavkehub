@@ -1,4 +1,4 @@
--- [[ HVH OBKAK | ULTIMATE EDITION (SAFETY CHECK & MULTIPOINT) ]] --
+-- [[ HVH OBKAK | ULTIMATE EDITION (PEEK & SHIFTLOCK FIX) ]] --
 
 local UserInputService = game:GetService("UserInputService")
 local CoreGui = game:GetService("CoreGui")
@@ -12,9 +12,9 @@ local Camera = workspace.CurrentCamera
 local Settings = {
     AimbotEnabled = false,
     AutoFire = true,
-    FixAim = true, 
+    FixAim = true, -- Режим Peek Fix (стрельба только если персонаж высунулся)
     MultiPoint = true,
-    SafetyCheck = true, -- Новое: проверка перед выстрелом
+    SafetyCheck = true,
     FOV_RADIUS = 150,
     TARGET_PART = "Head",
     TARGET_LIST = {"Head", "UpperTorso", "LowerTorso", "HumanoidRootPart", "Random", "All"},
@@ -40,39 +40,39 @@ local Settings = {
 local PriorityParts = {"Head", "UpperTorso", "LowerTorso", "LeftUpperArm", "RightUpperArm", "LeftUpperLeg", "RightUpperLeg"}
 local ESP_CACHE = {}
 
--- [[ УЛУЧШЕННАЯ ПРОВЕРКА СТЕН ]] --
+-- [[ УЛЬТРА-ПРОВЕРКА ВИДИМОСТИ (PEEK FIX) ]] --
 local function IsVisible(part, targetCharacter)
     if not Settings.AimbotWallCheck then return true end
     
     local character = LocalPlayer.Character
     if not character or not character:FindFirstChild("Head") then return false end
     
-    local origin = Settings.FixAim and character.Head.Position or Camera.CFrame.Position
-    
-    -- Точки для проверки (Multipoint: центр и края)
-    local pointsToTrack = {part.Position}
-    if Settings.MultiPoint then
-        table.insert(pointsToTrack, part.Position + Vector3.new(0.2, 0, 0))
-        table.insert(pointsToTrack, part.Position + Vector3.new(-0.2, 0, 0))
-    end
+    -- 1. Проверка от Камеры (видит ли игрок цель)
+    local camOrigin = Camera.CFrame.Position
+    -- 2. Проверка от Головы персонажа (высунулся ли персонаж из-за стены)
+    local charOrigin = character.Head.Position
 
+    local targetPos = part.Position
+    
+    -- Параметры луча
     local params = RaycastParams.new()
     params.FilterType = Enum.RaycastFilterType.Exclude
     params.FilterDescendantsInstances = {character, targetCharacter, Camera}
     params.IgnoreWater = true
     
-    local visiblePoints = 0
-    for _, dot in ipairs(pointsToTrack) do
-        local res = workspace:Raycast(origin, dot - origin, params)
-        if not res then visiblePoints = visiblePoints + 1 end
-    end
+    -- Проверка 1: Камера -> Цель
+    local resCam = workspace:Raycast(camOrigin, targetPos - camOrigin, params)
     
-    -- Если включен SafetyCheck, нам нужно чтобы хотя бы 2 точки из 3 были видны
-    if Settings.SafetyCheck and Settings.MultiPoint then
-        return visiblePoints >= 2
-    end
+    -- Проверка 2: Голова персонажа -> Цель (тот самый фикс с видео)
+    local resChar = workspace:Raycast(charOrigin, targetPos - charOrigin, params)
     
-    return visiblePoints > 0
+    -- Если FixAim включен, нам нужно, чтобы ОБА луча были чистыми.
+    -- Это значит, что ты не выстрелишь, пока пушка не выйдет из-за стены.
+    if Settings.FixAim then
+        return (resCam == nil) and (resChar == nil)
+    else
+        return resCam == nil
+    end
 end
 
 local function getBestPart(character)
@@ -203,9 +203,8 @@ CreateTab("Rage"); CreateTab("Misc")
 
 -- [[ CONTENT ]] --
 CreateToggle(aimPage, "Aimbot Enabled", Settings.AimbotEnabled, function(v) Settings.AimbotEnabled = v; circle.Visible = v end)
-CreateToggle(aimPage, "Fix Aim (ShiftLock)", Settings.FixAim, function(v) Settings.FixAim = v end)
+CreateToggle(aimPage, "Fix Aim (Peek Fix)", Settings.FixAim, function(v) Settings.FixAim = v end)
 CreateToggle(aimPage, "Fix MultiPoint", Settings.MultiPoint, function(v) Settings.MultiPoint = v end)
-CreateToggle(aimPage, "Safety Check (No WallHits)", Settings.SafetyCheck, function(v) Settings.SafetyCheck = v end)
 CreateToggle(aimPage, "Auto Fire", Settings.AutoFire, function(v) Settings.AutoFire = v end)
 
 local HitboxBtn = Instance.new("TextButton", aimPage); HitboxBtn.Size = UDim2.new(1, 0, 0, 28); HitboxBtn.BackgroundTransparency = 1; HitboxBtn.Text = "  [ Target Part ]: Head"; HitboxBtn.TextColor3 = Color3.new(0.8,0.8,0.8); HitboxBtn.TextSize = 14; HitboxBtn.TextXAlignment = 0
@@ -263,14 +262,14 @@ RunService.RenderStepped:Connect(function()
     else Settings.isSnapped = false end
 
     if Settings.AutoFire and target and (tick() - Settings.LastShotTime >= Settings.FIRE_RATE) then
-        -- Safety Check: повторная проверка прямо перед кликом
+        -- Проверка видимости прямо перед выстрелом
         if IsVisible(target, target.Parent) then
             Settings.LastShotTime = tick()
             local old = Camera.CFrame
             Camera.CFrame = CFrame.new(Camera.CFrame.Position, target.Position)
             
-            -- Микро-задержка для стабилизации наводки
-            task.wait(0.02)
+            -- Короткое ожидание, чтобы сервер понял позицию
+            task.wait(0.01)
             
             if mouse1press then mouse1press(); task.wait(0.01); mouse1release() else
                 local t = LocalPlayer.Character:FindFirstChildOfClass("Tool"); if t then t:Activate() end

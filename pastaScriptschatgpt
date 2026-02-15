@@ -1,4 +1,4 @@
--- [[ HVH OBKAK | ULTIMATE EDITION (SLIDER & WALLCHECK FIX) ]] --
+-- [[ HVH OBKAK | ULTIMATE EDITION (SAFETY CHECK & MULTIPOINT) ]] --
 
 local UserInputService = game:GetService("UserInputService")
 local CoreGui = game:GetService("CoreGui")
@@ -12,7 +12,9 @@ local Camera = workspace.CurrentCamera
 local Settings = {
     AimbotEnabled = false,
     AutoFire = true,
-    FixAim = true,
+    FixAim = true, 
+    MultiPoint = true,
+    SafetyCheck = true, -- Новое: проверка перед выстрелом
     FOV_RADIUS = 150,
     TARGET_PART = "Head",
     TARGET_LIST = {"Head", "UpperTorso", "LowerTorso", "HumanoidRootPart", "Random", "All"},
@@ -32,13 +34,13 @@ local Settings = {
     MaxDistance = 1500,
     ChamsTransparency = 0.5,
     
-    IsDraggingSlider = false -- Флаг для блокировки перетаскивания окна
+    IsDraggingSlider = false
 }
 
 local PriorityParts = {"Head", "UpperTorso", "LowerTorso", "LeftUpperArm", "RightUpperArm", "LeftUpperLeg", "RightUpperLeg"}
 local ESP_CACHE = {}
 
--- [[ ФУНКЦИЯ ПРОВЕРКИ СТЕН ]] --
+-- [[ УЛУЧШЕННАЯ ПРОВЕРКА СТЕН ]] --
 local function IsVisible(part, targetCharacter)
     if not Settings.AimbotWallCheck then return true end
     
@@ -46,16 +48,31 @@ local function IsVisible(part, targetCharacter)
     if not character or not character:FindFirstChild("Head") then return false end
     
     local origin = Settings.FixAim and character.Head.Position or Camera.CFrame.Position
-    local destination = part.Position
-    local direction = destination - origin
     
+    -- Точки для проверки (Multipoint: центр и края)
+    local pointsToTrack = {part.Position}
+    if Settings.MultiPoint then
+        table.insert(pointsToTrack, part.Position + Vector3.new(0.2, 0, 0))
+        table.insert(pointsToTrack, part.Position + Vector3.new(-0.2, 0, 0))
+    end
+
     local params = RaycastParams.new()
     params.FilterType = Enum.RaycastFilterType.Exclude
     params.FilterDescendantsInstances = {character, targetCharacter, Camera}
     params.IgnoreWater = true
     
-    local result = workspace:Raycast(origin, direction, params)
-    return result == nil
+    local visiblePoints = 0
+    for _, dot in ipairs(pointsToTrack) do
+        local res = workspace:Raycast(origin, dot - origin, params)
+        if not res then visiblePoints = visiblePoints + 1 end
+    end
+    
+    -- Если включен SafetyCheck, нам нужно чтобы хотя бы 2 точки из 3 были видны
+    if Settings.SafetyCheck and Settings.MultiPoint then
+        return visiblePoints >= 2
+    end
+    
+    return visiblePoints > 0
 end
 
 local function getBestPart(character)
@@ -156,7 +173,6 @@ local function CreateSlider(parent, text, min, max, default, callback)
     local label = Instance.new("TextLabel", container); label.Text = "  " .. text .. ": " .. default; label.Size = UDim2.new(1,0,0,16); label.TextColor3 = Color3.new(0.6,0.6,0.6); label.TextSize = 14; label.BackgroundTransparency = 1; label.TextXAlignment = 0
     local bg = Instance.new("Frame", container); bg.Size = UDim2.new(0.7,0,0,2); bg.Position = UDim2.new(0.05,0,0.75,0); bg.BackgroundColor3 = Color3.fromRGB(45,45,45)
     local fill = Instance.new("Frame", bg); fill.Size = UDim2.new((default-min)/(max-min),0,1,0); fill.BackgroundColor3 = Color3.new(0.8,0.8,0.8); fill.BorderSizePixel = 0
-    
     local dragging = false
     local function update(input)
         local pos = math.clamp((input.Position.X - bg.AbsolutePosition.X) / bg.AbsoluteSize.X, 0, 1)
@@ -164,20 +180,9 @@ local function CreateSlider(parent, text, min, max, default, callback)
         if max > 10 then val = math.floor(val) else val = math.floor(val * 10) / 10 end
         fill.Size = UDim2.new(pos,0,1,0); label.Text = "  " .. text .. ": " .. val; callback(val)
     end
-    
-    bg.InputBegan:Connect(function(input) 
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then 
-            dragging = true; Settings.IsDraggingSlider = true; update(input) 
-        end 
-    end)
-    UserInputService.InputChanged:Connect(function(input) 
-        if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then update(input) end 
-    end)
-    UserInputService.InputEnded:Connect(function(input) 
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then 
-            dragging = false; Settings.IsDraggingSlider = false 
-        end 
-    end)
+    bg.InputBegan:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = true; Settings.IsDraggingSlider = true; update(input) end end)
+    UserInputService.InputChanged:Connect(function(input) if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then update(input) end end)
+    UserInputService.InputEnded:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false; Settings.IsDraggingSlider = false end end)
 end
 
 local function CreateTab(name)
@@ -199,7 +204,10 @@ CreateTab("Rage"); CreateTab("Misc")
 -- [[ CONTENT ]] --
 CreateToggle(aimPage, "Aimbot Enabled", Settings.AimbotEnabled, function(v) Settings.AimbotEnabled = v; circle.Visible = v end)
 CreateToggle(aimPage, "Fix Aim (ShiftLock)", Settings.FixAim, function(v) Settings.FixAim = v end)
+CreateToggle(aimPage, "Fix MultiPoint", Settings.MultiPoint, function(v) Settings.MultiPoint = v end)
+CreateToggle(aimPage, "Safety Check (No WallHits)", Settings.SafetyCheck, function(v) Settings.SafetyCheck = v end)
 CreateToggle(aimPage, "Auto Fire", Settings.AutoFire, function(v) Settings.AutoFire = v end)
+
 local HitboxBtn = Instance.new("TextButton", aimPage); HitboxBtn.Size = UDim2.new(1, 0, 0, 28); HitboxBtn.BackgroundTransparency = 1; HitboxBtn.Text = "  [ Target Part ]: Head"; HitboxBtn.TextColor3 = Color3.new(0.8,0.8,0.8); HitboxBtn.TextSize = 14; HitboxBtn.TextXAlignment = 0
 HitboxBtn.MouseButton1Click:Connect(function()
     Settings.CurrentPartIndex = Settings.CurrentPartIndex % #Settings.TARGET_LIST + 1
@@ -255,10 +263,15 @@ RunService.RenderStepped:Connect(function()
     else Settings.isSnapped = false end
 
     if Settings.AutoFire and target and (tick() - Settings.LastShotTime >= Settings.FIRE_RATE) then
+        -- Safety Check: повторная проверка прямо перед кликом
         if IsVisible(target, target.Parent) then
             Settings.LastShotTime = tick()
             local old = Camera.CFrame
             Camera.CFrame = CFrame.new(Camera.CFrame.Position, target.Position)
+            
+            -- Микро-задержка для стабилизации наводки
+            task.wait(0.02)
+            
             if mouse1press then mouse1press(); task.wait(0.01); mouse1release() else
                 local t = LocalPlayer.Character:FindFirstChildOfClass("Tool"); if t then t:Activate() end
             end
@@ -268,24 +281,14 @@ RunService.RenderStepped:Connect(function()
     stroke.Color = target and Color3.new(0,1,0) or Color3.new(0,1,1)
 end)
 
--- Управление UI (с фиксом перетаскивания)
+-- Управление UI
 local dragStart, startPos, dragging
-MainFrame.InputBegan:Connect(function(input) 
-    if input.UserInputType == Enum.UserInputType.MouseButton1 and not Settings.IsDraggingSlider then 
-        dragging = true; dragStart = input.Position; startPos = MainFrame.Position 
-    end 
-end)
-UserInputService.InputChanged:Connect(function(input) 
-    if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
-        local delta = input.Position - dragStart
-        MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-    end 
-end)
-UserInputService.InputEnded:Connect(function(input) 
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end 
-end)
-UserInputService.InputBegan:Connect(function(input, gpe) 
-    if not gpe and input.KeyCode == Enum.KeyCode.Insert then MainFrame.Visible = not MainFrame.Visible end 
-end)
+MainFrame.InputBegan:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 and not Settings.IsDraggingSlider then dragging = true; dragStart = input.Position; startPos = MainFrame.Position end end)
+UserInputService.InputChanged:Connect(function(input) if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+    local delta = input.Position - dragStart
+    MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+end end)
+UserInputService.InputEnded:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end end)
+UserInputService.InputBegan:Connect(function(input, gpe) if not gpe and input.KeyCode == Enum.KeyCode.Insert then MainFrame.Visible = not MainFrame.Visible end end)
 
 aimPage.Visible = true

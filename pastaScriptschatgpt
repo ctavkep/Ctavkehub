@@ -1,5 +1,3 @@
-
-
 local UserInputService = game:GetService("UserInputService")
 local CoreGui          = game:GetService("CoreGui")
 local Players          = game:GetService("Players")
@@ -34,8 +32,13 @@ local Settings = {
     MaxDistance      = 1500,
     ChamsTransparency= 0.5,
 
+    -- Настройки Третьего Лица
+    TP_Enabled       = false,
+    TP_Distance      = 10,
+    TP_Transparency  = 0.5,
+
     IsDraggingSlider = false,
-    IsFiring         = false,  -- FIX: блокировка повторного выстрела
+    IsFiring         = false,
 }
 
 local PriorityParts = {
@@ -47,14 +50,12 @@ local ESP_CACHE = {}
 -- ──────────────────── УТИЛИТА: безопасный вызов ───────────────────────── --
 local function safe(fn, ...)
     local ok, err = pcall(fn, ...)
-    -- если нужен дебаг: if not ok then warn("[OBKAK] "..tostring(err)) end
     return ok, err
 end
 
 -- ─────────────────── PEEK FIX / ПРОВЕРКА ВИДИМОСТИ ───────────────────── --
 local function IsVisible(part, targetCharacter)
     if not Settings.AimbotWallCheck then return true end
-    -- FIX: полные nil-проверки
     local character = LocalPlayer.Character
     if not character then return false end
     local head = character:FindFirstChild("Head")
@@ -70,11 +71,9 @@ local function IsVisible(part, targetCharacter)
     params.FilterDescendantsInstances = {character, targetCharacter, Camera}
     params.IgnoreWater = true
 
-    -- FIX: pcall на Raycast — иногда падает при стрессовой нагрузке
     local okCam,  resCam  = pcall(workspace.Raycast, workspace, camOrigin,  targetPos - camOrigin,  params)
     local okChar, resChar = pcall(workspace.Raycast, workspace, charOrigin, targetPos - charOrigin, params)
 
-    -- при ошибке считаем луч заблокированным (безопасно)
     if not okCam  then resCam  = true end
     if not okChar then resChar = true end
 
@@ -93,7 +92,6 @@ local function getBestPart(character)
             partName = PriorityParts[math.random(1, 3)]
         end
         local p = character:FindFirstChild(partName)
-        -- FIX: p.Parent на случай удаления во время итерации
         if p and p.Parent and IsVisible(p, character) then return p end
         return nil
     end
@@ -107,7 +105,6 @@ end
 -- ────────────────────────── ESP LOGIC ─────────────────────────────────── --
 local function GetESPData(player)
     if not ESP_CACHE[player] then
-        -- FIX: pcall — Drawing недоступен без нужного экзекутора
         local ok, result = pcall(function()
             return { Name = Drawing.new("Text"), Health = Drawing.new("Text") }
         end)
@@ -126,9 +123,6 @@ local function RemoveESP(player)
     end
 end
 Players.PlayerRemoving:Connect(RemoveESP)
-
--- FIX: очистка Drawing при выгрузке скрипта
-
 
 local function UpdateESP()
     for _, p in ipairs(Players:GetPlayers()) do
@@ -252,7 +246,7 @@ Title.Size             = UDim2.new(1, -20, 0, 35)
 Title.Position         = UDim2.new(0, 10, 0, 0)
 Title.TextColor3       = Color3.fromRGB(230, 230, 230)
 Title.TextSize         = 16
-Title.Font             = Enum.Font.SourceSansBold  -- FIX: убран магический номер
+Title.Font             = Enum.Font.SourceSansBold
 Title.TextXAlignment   = Enum.TextXAlignment.Left
 Title.BackgroundTransparency = 1
 
@@ -269,7 +263,6 @@ Pages.Size             = UDim2.new(1, -16, 1, -95)
 Pages.Position         = UDim2.new(0, 8, 0, 85)
 Pages.BackgroundTransparency = 1
 
--- ─────────── UI Компоненты ─────────── --
 local function CreateToggle(parent, text, default, callback)
     local btn = Instance.new("TextButton", parent)
     btn.Size             = UDim2.new(1, 0, 0, 28)
@@ -277,7 +270,7 @@ local function CreateToggle(parent, text, default, callback)
     btn.Text             = "  [ " .. (default and "X" or " ") .. " ] " .. text
     btn.TextColor3       = default and Color3.new(1,1,1) or Color3.new(0.6,0.6,0.6)
     btn.TextSize         = 14
-    btn.Font             = Enum.Font.Code  -- FIX: убран = 3
+    btn.Font             = Enum.Font.Code
     btn.TextXAlignment   = Enum.TextXAlignment.Left
     btn.MouseButton1Click:Connect(function()
         default = not default
@@ -315,7 +308,6 @@ local function CreateSlider(parent, text, min, max, default, callback)
     fill.BorderSizePixel = 0
     Instance.new("UICorner", fill).CornerRadius = UDim.new(1, 0)
 
-    -- FIX: прозрачная кнопка с увеличенной зоной нажатия
     local hitArea = Instance.new("TextButton", container)
     hitArea.Size             = UDim2.new(0.85, 0, 0, 20)
     hitArea.Position         = UDim2.new(0.05, 0, 0, 14)
@@ -323,15 +315,11 @@ local function CreateSlider(parent, text, min, max, default, callback)
     hitArea.Text             = ""
 
     local dragging = false
-
     local function applyValue(screenX)
         local rel = math.clamp((screenX - bg.AbsolutePosition.X) / bg.AbsoluteSize.X, 0, 1)
         local val
-        if (max - min) > 10 then
-            val = math.floor(min + (max - min) * rel)
-        else
-            val = math.floor((min + (max - min) * rel) * 10) / 10
-        end
+        if (max - min) > 10 then val = math.floor(min + (max - min) * rel)
+        else val = math.floor((min + (max - min) * rel) * 10) / 10 end
         fill.Size  = UDim2.new(rel, 0, 1, 0)
         label.Text = "  " .. text .. ": " .. val
         safe(callback, val)
@@ -344,21 +332,15 @@ local function CreateSlider(parent, text, min, max, default, callback)
             applyValue(input.Position.X)
         end
     end)
-
-    -- FIX: глобальные соединения, чтобы не терять drag при быстром движении мыши
     UserInputService.InputChanged:Connect(function(input)
-        if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
-            applyValue(input.Position.X)
-        end
+        if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then applyValue(input.Position.X) end
     end)
     UserInputService.InputEnded:Connect(function(input)
-        -- FIX: сбрасываем флаг только если ЭТОТ слайдер тащили
         if input.UserInputType == Enum.UserInputType.MouseButton1 and dragging then
             dragging = false
             Settings.IsDraggingSlider = false
         end
     end)
-
     return container
 end
 
@@ -368,7 +350,7 @@ local function CreateTab(name)
     btn.BackgroundColor3= Color3.fromRGB(20, 20, 20)
     btn.Text            = name
     btn.TextColor3      = Color3.new(0.5, 0.5, 0.5)
-    btn.Font            = Enum.Font.SourceSansBold  -- FIX: убран = 4
+    btn.Font            = Enum.Font.SourceSansBold
     btn.TextSize        = 16
     btn.BorderSizePixel = 0
 
@@ -377,57 +359,42 @@ local function CreateTab(name)
     page.Visible          = false
     page.BackgroundTransparency = 1
     page.ScrollBarThickness = 0
-    page.AutomaticCanvasSize = Enum.AutomaticSize.Y  -- FIX: = 2 → правильный enum
+    page.AutomaticCanvasSize = Enum.AutomaticSize.Y
     page.BorderSizePixel  = 0
     local layout = Instance.new("UIListLayout", page)
     layout.Padding = UDim.new(0, 4)
 
     btn.MouseButton1Click:Connect(function()
-        for _, v in pairs(Pages:GetChildren()) do
-            if v:IsA("ScrollingFrame") then v.Visible = false end
-        end
-        for _, v in pairs(TabBar:GetChildren()) do
-            if v:IsA("TextButton") then
-                v.TextColor3       = Color3.new(0.5, 0.5, 0.5)
-                v.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-            end
-        end
-        page.Visible       = true
-        btn.TextColor3     = Color3.new(1, 1, 1)
-        btn.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+        for _, v in pairs(Pages:GetChildren()) do if v:IsA("ScrollingFrame") then v.Visible = false end end
+        for _, v in pairs(TabBar:GetChildren()) do if v:IsA("TextButton") then
+            v.TextColor3 = Color3.new(0.5, 0.5, 0.5) v.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+        end end
+        page.Visible = true
+        btn.TextColor3 = Color3.new(1, 1, 1) btn.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
     end)
-
     return page, btn
 end
 
 -- ─────────── Табы ─────────── --
 local aimPage, aimBtn = CreateTab("Aimbot")
 local espPage         = CreateTab("Visuals")
-CreateTab("Rage")
-CreateTab("Misc")
+local ragePage        = CreateTab("Rage")
+local miscPage        = CreateTab("Misc")
 
 -- ─────────── Контент: Aimbot ─────────── --
-CreateToggle(aimPage, "Aimbot Enabled", Settings.AimbotEnabled,
-    function(v) Settings.AimbotEnabled = v; circle.Visible = v end)
-CreateToggle(aimPage, "Fix Aim (Peek Fix)", Settings.FixAim,
-    function(v) Settings.FixAim = v end)
-CreateToggle(aimPage, "Fix MultiPoint", Settings.MultiPoint,
-    function(v) Settings.MultiPoint = v end)
-CreateToggle(aimPage, "Auto Fire", Settings.AutoFire,
-    function(v) Settings.AutoFire = v end)
+CreateToggle(aimPage, "Aimbot Enabled", Settings.AimbotEnabled, function(v) Settings.AimbotEnabled = v; circle.Visible = v end)
+CreateToggle(aimPage, "Fix Aim (Peek Fix)", Settings.FixAim, function(v) Settings.FixAim = v end)
+CreateToggle(aimPage, "Fix MultiPoint", Settings.MultiPoint, function(v) Settings.MultiPoint = v end)
+CreateToggle(aimPage, "Auto Fire", Settings.AutoFire, function(v) Settings.AutoFire = v end)
 
 local HitboxBtn = Instance.new("TextButton", aimPage)
-HitboxBtn.Size             = UDim2.new(1, 0, 0, 28)
-HitboxBtn.BackgroundTransparency = 1
-HitboxBtn.Text             = "  [ Target Part ]: Head"
-HitboxBtn.TextColor3       = Color3.new(0.8, 0.8, 0.8)
-HitboxBtn.TextSize         = 14
-HitboxBtn.Font             = Enum.Font.Code
-HitboxBtn.TextXAlignment   = Enum.TextXAlignment.Left
+HitboxBtn.Size, HitboxBtn.BackgroundTransparency = UDim2.new(1, 0, 0, 28), 1
+HitboxBtn.Text, HitboxBtn.TextColor3, HitboxBtn.TextSize = "  [ Target Part ]: Head", Color3.new(0.8, 0.8, 0.8), 14
+HitboxBtn.Font, HitboxBtn.TextXAlignment = Enum.Font.Code, Enum.TextXAlignment.Left
 HitboxBtn.MouseButton1Click:Connect(function()
     Settings.CurrentPartIndex = Settings.CurrentPartIndex % #Settings.TARGET_LIST + 1
-    Settings.TARGET_PART      = Settings.TARGET_LIST[Settings.CurrentPartIndex]
-    HitboxBtn.Text            = "  [ Target Part ]: " .. Settings.TARGET_PART
+    Settings.TARGET_PART = Settings.TARGET_LIST[Settings.CurrentPartIndex]
+    HitboxBtn.Text = "  [ Target Part ]: " .. Settings.TARGET_PART
 end)
 
 CreateToggle(aimPage, "Wall Check",  Settings.AimbotWallCheck, function(v) Settings.AimbotWallCheck = v end)
@@ -443,44 +410,44 @@ CreateToggle(espPage, "Show Chams",   Settings.ShowChams,   function(v) Settings
 CreateToggle(espPage, "Team Check",   Settings.ESPTeamCheck,function(v) Settings.ESPTeamCheck= v end)
 CreateSlider(espPage, "Max Distance", 100, 5000, Settings.MaxDistance, function(v) Settings.MaxDistance = v end)
 
--- ──────────────────────── AUTO FIRE (отдельный поток) ─────────────────── --
--- FIX: task.wait() нельзя в RenderStepped — вынесено в task.spawn
+-- ─────────── Контент: Misc (ИНТЕГРАЦИЯ ТРЕТЬЕГО ЛИЦА) ─────────── --
+CreateToggle(miscPage, "Third Person Enabled", Settings.TP_Enabled, function(v) 
+    Settings.TP_Enabled = v 
+    if not v then
+        -- Возврат в 1-е лицо при выключении
+        Player.CameraMode = Enum.CameraMode.LockFirstPerson
+        local char = LocalPlayer.Character
+        if char then
+            for _, part in pairs(char:GetDescendants()) do
+                if part:IsA("BasePart") then part.LocalTransparencyModifier = 0 end
+            end
+        end
+    end
+end)
+CreateSlider(miscPage, "TP Distance", 2, 50, Settings.TP_Distance, function(v) Settings.TP_Distance = v end)
+CreateSlider(miscPage, "Character Transparency", 0, 1, Settings.TP_Transparency, function(v) Settings.TP_Transparency = v end)
+
+-- ──────────────────────── AUTO FIRE ─────────────────── --
 local function DoAutoFire(target)
     if Settings.IsFiring then return end
     if not target or not target.Parent then return end
-
-    Settings.IsFiring    = true
-    Settings.LastShotTime= tick()
-
+    Settings.IsFiring = true
+    Settings.LastShotTime = tick()
     local ok = pcall(function()
         local savedCF = Camera.CFrame
         Camera.CFrame = CFrame.new(Camera.CFrame.Position, target.Position)
         task.wait(0.01)
-
-        -- Повторная проверка — цель могла умереть
         if target and target.Parent then
-            if mouse1press then
-                mouse1press()
-                task.wait(0.01)
-                mouse1release()
+            if mouse1press then mouse1press() task.wait(0.01) mouse1release()
             else
                 local char = LocalPlayer.Character
-                if char then
-                    local tool = char:FindFirstChildOfClass("Tool")
+                if char then local tool = char:FindFirstChildOfClass("Tool")
                     if tool then safe(function() tool:Activate() end) end
                 end
             end
         end
-
-        task.defer(function()
-            safe(function() Camera.CFrame = savedCF end)
-        end)
+        task.defer(function() safe(function() Camera.CFrame = savedCF end) end)
     end)
-
-    if not ok then
-        -- FIX: если pcall сломался — сбрасываем флаг, иначе AutoFire залочится навсегда
-        safe(function() Camera.CFrame = Camera.CFrame end)
-    end
     Settings.IsFiring = false
 end
 
@@ -488,10 +455,38 @@ end
 RunService.RenderStepped:Connect(function()
     safe(UpdateESP)
 
+    -- ЛОГИКА ТРЕТЬЕГО ЛИЦА
+    if Settings.TP_Enabled then
+        safe(function()
+            local char = LocalPlayer.Character
+            if char and char:FindFirstChild("HumanoidRootPart") then
+                local root = char.HumanoidRootPart
+                -- 1. Режим камеры и зум
+                LocalPlayer.CameraMode = Enum.CameraMode.Classic
+                LocalPlayer.CameraMaxZoomDistance = Settings.TP_Distance
+                LocalPlayer.CameraMinZoomDistance = Settings.TP_Distance
+                -- 2. Фикс курсора и поворот тела
+                UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+                local look = Camera.CFrame.LookVector
+                root.CFrame = CFrame.new(root.Position, root.Position + Vector3.new(look.X, 0, look.Z))
+                -- 3. Прозрачность тела
+                for _, part in pairs(char:GetDescendants()) do
+                    if part:IsA("BasePart") then part.LocalTransparencyModifier = Settings.TP_Transparency end
+                end
+                -- 4. Чистка Viewmodel (рук) в камере
+                for _, obj in pairs(Camera:GetChildren()) do
+                    if obj:IsA("Model") or obj:IsA("BasePart") then
+                        for _, p in pairs(obj:GetDescendants()) do
+                            if p:IsA("BasePart") then p.LocalTransparencyModifier = 1 end
+                        end
+                    end
+                end
+            end
+        end)
+    end
+
     if not Settings.AimbotEnabled then return end
-
     circle.Size = UDim2.new(0, Settings.FOV_RADIUS * 2, 0, Settings.FOV_RADIUS * 2)
-
     local target, minDist = nil, Settings.FOV_RADIUS
     local viewCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
 
@@ -502,19 +497,15 @@ RunService.RenderStepped:Connect(function()
             local hum = p.Character:FindFirstChildOfClass("Humanoid")
             if not hum or hum.Health <= 0 then return end
             if Settings.AimbotTeamCheck and p.Team == LocalPlayer.Team then return end
-
             local part = getBestPart(p.Character)
             if not part then return end
-
             local pos, onScreen = Camera:WorldToViewportPoint(part.Position)
             if not onScreen then return end
-
             local mag = (Vector2.new(pos.X, pos.Y) - viewCenter).Magnitude
             if mag < minDist then minDist = mag; target = part end
         end)
     end
 
-    -- Snap пока зажата ЛКМ
     if UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) and target then
         safe(function()
             if not Settings.isSnapped then
@@ -527,63 +518,32 @@ RunService.RenderStepped:Connect(function()
                 Settings.isSnapped = false
             end
         end)
-    else
-        Settings.isSnapped = false
-    end
+    else Settings.isSnapped = false end
 
-    -- AutoFire
     if Settings.AutoFire and target and not Settings.IsFiring then
         if (tick() - Settings.LastShotTime) >= Settings.FIRE_RATE then
-            if IsVisible(target, target.Parent) then
-                -- FIX: task.spawn — не блокирует RenderStepped
-                task.spawn(DoAutoFire, target)
-            end
+            if IsVisible(target, target.Parent) then task.spawn(DoAutoFire, target) end
         end
     end
-
-    -- Цвет FOV кольца
-    safe(function()
-        stroke.Color = target and Color3.new(0,1,0) or Color3.new(0,1,1)
-    end)
+    safe(function() stroke.Color = target and Color3.new(0,1,0) or Color3.new(0,1,1) end)
 end)
 
 -- ─────────────────────── ПЕРЕТАСКИВАНИЕ UI ────────────────────────────── --
 local dragStart, startPos, isDragging = nil, nil, false
-
 MainFrame.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1
-       and not Settings.IsDraggingSlider then
-        isDragging = true
-        dragStart  = input.Position
-        startPos   = MainFrame.Position
+    if input.UserInputType == Enum.UserInputType.MouseButton1 and not Settings.IsDraggingSlider then
+        isDragging = true dragStart = input.Position startPos = MainFrame.Position
     end
 end)
-
 UserInputService.InputChanged:Connect(function(input)
     if isDragging and input.UserInputType == Enum.UserInputType.MouseMovement and dragStart then
         local delta = input.Position - dragStart
-        MainFrame.Position = UDim2.new(
-            startPos.X.Scale, startPos.X.Offset + delta.X,
-            startPos.Y.Scale, startPos.Y.Offset + delta.Y
-        )
+        MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
     end
 end)
+UserInputService.InputEnded:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 then isDragging = false end end)
+UserInputService.InputBegan:Connect(function(input, gpe) if not gpe and input.KeyCode == Enum.KeyCode.Insert then MainFrame.Visible = not MainFrame.Visible end end)
 
-UserInputService.InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        isDragging = false
-    end
-end)
-
-UserInputService.InputBegan:Connect(function(input, gpe)
-    if not gpe and input.KeyCode == Enum.KeyCode.Insert then
-        MainFrame.Visible = not MainFrame.Visible
-    end
-end)
-
--- Открыть первую вкладку по умолчанию
-aimPage.Visible        = true
-aimBtn.TextColor3      = Color3.new(1, 1, 1)
-aimBtn.BackgroundColor3= Color3.fromRGB(35, 35, 35)
-
-print("[HVH OBKAK] Загружен! Insert — меню.")
+aimPage.Visible = true
+aimBtn.TextColor3 = Color3.new(1, 1, 1)
+aimBtn.BackgroundColor3 = Color3.fromRGB(35, 35, 35)

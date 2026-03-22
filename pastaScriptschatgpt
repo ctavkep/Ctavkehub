@@ -39,6 +39,11 @@ local Settings = {
 
     IsDraggingSlider = false,
     IsFiring         = false,
+
+    -- Настройки Rage (Джиттер / Anti-Aim)
+    JitterEnabled    = false,
+    JitterDegree     = 65,
+    JitterSpeed      = 45,
 }
 
 local PriorityParts = {
@@ -229,14 +234,14 @@ stroke.Color = Color3.fromRGB(0, 255, 255)
 Instance.new("UICorner", circle).CornerRadius = UDim.new(1, 0)
 
 local MainFrame = Instance.new("Frame", ScreenGui)
-MainFrame.Size            = UDim2.new(0, 620, 0, 420)
-MainFrame.Position        = UDim2.new(0.5, -310, 0.5, -210)
+MainFrame.Size             = UDim2.new(0, 620, 0, 420)
+MainFrame.Position         = UDim2.new(0.5, -310, 0.5, -210)
 MainFrame.BackgroundColor3= Color3.fromRGB(15, 15, 15)
 MainFrame.BorderSizePixel = 0
 
 local Inner = Instance.new("Frame", MainFrame)
-Inner.Size            = UDim2.new(1, -6, 1, -6)
-Inner.Position        = UDim2.new(0, 3, 0, 3)
+Inner.Size             = UDim2.new(1, -6, 1, -6)
+Inner.Position         = UDim2.new(0, 3, 0, 3)
 Inner.BackgroundColor3= Color3.fromRGB(25, 25, 25)
 Inner.BorderSizePixel = 0
 
@@ -251,8 +256,8 @@ Title.TextXAlignment   = Enum.TextXAlignment.Left
 Title.BackgroundTransparency = 1
 
 local TabBar = Instance.new("Frame", Inner)
-TabBar.Size            = UDim2.new(1, -16, 0, 40)
-TabBar.Position        = UDim2.new(0, 8, 0, 35)
+TabBar.Size             = UDim2.new(1, -16, 0, 40)
+TabBar.Position         = UDim2.new(0, 8, 0, 35)
 TabBar.BackgroundColor3= Color3.fromRGB(20, 20, 20)
 TabBar.BorderSizePixel = 0
 local tabLayout = Instance.new("UIListLayout", TabBar)
@@ -296,14 +301,14 @@ local function CreateSlider(parent, text, min, max, default, callback)
     label.TextXAlignment = Enum.TextXAlignment.Left
 
     local bg = Instance.new("Frame", container)
-    bg.Size            = UDim2.new(0.85, 0, 0, 4)
-    bg.Position        = UDim2.new(0.05, 0, 0, 22)
+    bg.Size             = UDim2.new(0.85, 0, 0, 4)
+    bg.Position         = UDim2.new(0.05, 0, 0, 22)
     bg.BackgroundColor3= Color3.fromRGB(45, 45, 45)
     bg.BorderSizePixel = 0
     Instance.new("UICorner", bg).CornerRadius = UDim.new(1, 0)
 
     local fill = Instance.new("Frame", bg)
-    fill.Size            = UDim2.new((default - min) / (max - min), 0, 1, 0)
+    fill.Size             = UDim2.new((default - min) / (max - min), 0, 1, 0)
     fill.BackgroundColor3= Color3.new(0.8, 0.8, 0.8)
     fill.BorderSizePixel = 0
     Instance.new("UICorner", fill).CornerRadius = UDim.new(1, 0)
@@ -346,12 +351,12 @@ end
 
 local function CreateTab(name)
     local btn = Instance.new("TextButton", TabBar)
-    btn.Size            = UDim2.new(1/4, 0, 1, 0)
+    btn.Size             = UDim2.new(1/4, 0, 1, 0)
     btn.BackgroundColor3= Color3.fromRGB(20, 20, 20)
-    btn.Text            = name
-    btn.TextColor3      = Color3.new(0.5, 0.5, 0.5)
-    btn.Font            = Enum.Font.SourceSansBold
-    btn.TextSize        = 16
+    btn.Text             = name
+    btn.TextColor3       = Color3.new(0.5, 0.5, 0.5)
+    btn.Font             = Enum.Font.SourceSansBold
+    btn.TextSize         = 16
     btn.BorderSizePixel = 0
 
     local page = Instance.new("ScrollingFrame", Pages)
@@ -410,12 +415,17 @@ CreateToggle(espPage, "Show Chams",   Settings.ShowChams,   function(v) Settings
 CreateToggle(espPage, "Team Check",   Settings.ESPTeamCheck,function(v) Settings.ESPTeamCheck= v end)
 CreateSlider(espPage, "Max Distance", 100, 5000, Settings.MaxDistance, function(v) Settings.MaxDistance = v end)
 
+-- ─────────── Контент: Rage ─────────── --
+CreateToggle(ragePage, "Anti-Aim (Jitter)", Settings.JitterEnabled, function(v) Settings.JitterEnabled = v end)
+CreateSlider(ragePage, "Jitter Degree", 10, 180, Settings.JitterDegree, function(v) Settings.JitterDegree = v end)
+CreateSlider(ragePage, "Jitter Speed", 5, 100, Settings.JitterSpeed, function(v) Settings.JitterSpeed = v end)
+
 -- ─────────── Контент: Misc (ИНТЕГРАЦИЯ ТРЕТЬЕГО ЛИЦА) ─────────── --
 CreateToggle(miscPage, "Third Person Enabled", Settings.TP_Enabled, function(v) 
     Settings.TP_Enabled = v 
     if not v then
         -- Возврат в 1-е лицо при выключении
-        Player.CameraMode = Enum.CameraMode.LockFirstPerson
+        LocalPlayer.CameraMode = Enum.CameraMode.LockFirstPerson
         local char = LocalPlayer.Character
         if char then
             for _, part in pairs(char:GetDescendants()) do
@@ -451,24 +461,62 @@ local function DoAutoFire(target)
     Settings.IsFiring = false
 end
 
+-- ─────────────────────── ANTI-AIM & ТРЕТЬЕ ЛИЦО (ПРИОРИТЕТНЫЙ ЦИКЛ) ─────────── --
+local wasJittering = false
+RunService:BindToRenderStep("HVH_AntiAim_TP", Enum.RenderPriority.Camera.Value + 1, function()
+    local char = LocalPlayer.Character
+    if not char then return end
+    local root = char:FindFirstChild("HumanoidRootPart")
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not root or not hum or hum.Health <= 0 then return end
+
+    -- Объединенная логика поворота: работает для TP, Jitter или для обоих сразу
+    if Settings.JitterEnabled or Settings.TP_Enabled then
+        local camCF = Camera.CFrame
+        local flatLook = Vector3.new(camCF.LookVector.X, 0, camCF.LookVector.Z)
+        
+        -- Предохранитель, если смотрим строго вверх/вниз
+        if flatLook.Magnitude > 0.1 then
+            flatLook = flatLook.Unit
+            local yOffset = 0
+            
+            if Settings.JitterEnabled then
+                if hum.AutoRotate then hum.AutoRotate = false end
+                wasJittering = true
+                local offset = (math.sin(tick() * Settings.JitterSpeed) > 0) and Settings.JitterDegree or -Settings.JitterDegree
+                yOffset = math.pi + math.rad(offset)
+            else
+                if wasJittering then
+                    hum.AutoRotate = true
+                    wasJittering = false
+                end
+            end
+
+            root.CFrame = CFrame.lookAt(root.Position, root.Position + flatLook) * CFrame.Angles(0, yOffset, 0)
+        end
+    else
+        if wasJittering then
+            hum.AutoRotate = true
+            wasJittering = false
+        end
+    end
+end)
+
 -- ─────────────────────── MAIN LOOP ────────────────────────────────────── --
 RunService.RenderStepped:Connect(function()
     safe(UpdateESP)
 
-    -- ЛОГИКА ТРЕТЬЕГО ЛИЦА
+    -- ЛОГИКА ТРЕТЬЕГО ЛИЦА (Только камера и визуал, поворот перенесен в BindToRenderStep выше)
     if Settings.TP_Enabled then
         safe(function()
             local char = LocalPlayer.Character
             if char and char:FindFirstChild("HumanoidRootPart") then
-                local root = char.HumanoidRootPart
                 -- 1. Режим камеры и зум
                 LocalPlayer.CameraMode = Enum.CameraMode.Classic
                 LocalPlayer.CameraMaxZoomDistance = Settings.TP_Distance
                 LocalPlayer.CameraMinZoomDistance = Settings.TP_Distance
-                -- 2. Фикс курсора и поворот тела
+                -- 2. Фикс курсора
                 UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
-                local look = Camera.CFrame.LookVector
-                root.CFrame = CFrame.new(root.Position, root.Position + Vector3.new(look.X, 0, look.Z))
                 -- 3. Прозрачность тела
                 for _, part in pairs(char:GetDescendants()) do
                     if part:IsA("BasePart") then part.LocalTransparencyModifier = Settings.TP_Transparency end

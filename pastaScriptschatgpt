@@ -6,7 +6,9 @@ local RunService       = game:GetService("RunService")
 local LocalPlayer = Players.LocalPlayer
 local Camera      = workspace.CurrentCamera
 
--- ─────────────────────────── НАСТРОЙКИ ────────────────────────────────── --
+local defaultMaxZoom = LocalPlayer.CameraMaxZoomDistance
+local defaultMinZoom = LocalPlayer.CameraMinZoomDistance
+
 local Settings = {
     AimbotEnabled    = false,
     AutoFire         = true,
@@ -22,7 +24,6 @@ local Settings = {
     FIRE_RATE        = 1.5,
     LastShotTime     = 0,
     isSnapped        = false,
-    snapOffset       = CFrame.new(),
 
     ESPEnabled       = false,
     ShowNames        = true,
@@ -32,7 +33,6 @@ local Settings = {
     MaxDistance      = 1500,
     ChamsTransparency= 0.5,
 
-    -- Настройки Третьего Лица
     TP_Enabled       = false,
     TP_Distance      = 10,
     TP_Transparency  = 0.5,
@@ -40,10 +40,13 @@ local Settings = {
     IsDraggingSlider = false,
     IsFiring         = false,
 
-    -- Настройки Rage (Джиттер / Anti-Aim)
     JitterEnabled    = false,
     JitterDegree     = 65,
     JitterSpeed      = 45,
+
+    -- Silent AutoFire return
+    SilentReturnCFrame = nil,
+    SilentReturnFrames = 0,
 }
 
 local PriorityParts = {
@@ -52,13 +55,23 @@ local PriorityParts = {
 }
 local ESP_CACHE = {}
 
--- ──────────────────── УТИЛИТА: безопасный вызов ───────────────────────── --
 local function safe(fn, ...)
     local ok, err = pcall(fn, ...)
     return ok, err
 end
 
--- ─────────────────── PEEK FIX / ПРОВЕРКА ВИДИМОСТИ ───────────────────── --
+local function GetAimLookTarget(targetPos)
+    if Settings.TP_Enabled then
+        local char = LocalPlayer.Character
+        local head = char and char:FindFirstChild("Head")
+        if head then
+            local dir = (targetPos - head.Position).Unit
+            return Camera.CFrame.Position + dir * 2000
+        end
+    end
+    return targetPos
+end
+
 local function IsVisible(part, targetCharacter)
     if not Settings.AimbotWallCheck then return true end
     local character = LocalPlayer.Character
@@ -107,7 +120,6 @@ local function getBestPart(character)
     return nil
 end
 
--- ────────────────────────── ESP LOGIC ─────────────────────────────────── --
 local function GetESPData(player)
     if not ESP_CACHE[player] then
         local ok, result = pcall(function()
@@ -208,7 +220,6 @@ local function UpdateESP()
     end
 end
 
--- ────────────────────────── UI SYSTEM ─────────────────────────────────── --
 safe(function()
     if CoreGui:FindFirstChild("HVH_OBKAK_Menu") then CoreGui.HVH_OBKAK_Menu:Destroy() end
     if CoreGui:FindFirstChild("SilentGui")       then CoreGui.SilentGui:Destroy()       end
@@ -380,13 +391,11 @@ local function CreateTab(name)
     return page, btn
 end
 
--- ─────────── Табы ─────────── --
 local aimPage, aimBtn = CreateTab("Aimbot")
 local espPage         = CreateTab("Visuals")
 local ragePage        = CreateTab("Rage")
 local miscPage        = CreateTab("Misc")
 
--- ─────────── Контент: Aimbot ─────────── --
 CreateToggle(aimPage, "Aimbot Enabled", Settings.AimbotEnabled, function(v) Settings.AimbotEnabled = v; circle.Visible = v end)
 CreateToggle(aimPage, "Fix Aim (Peek Fix)", Settings.FixAim, function(v) Settings.FixAim = v end)
 CreateToggle(aimPage, "Fix MultiPoint", Settings.MultiPoint, function(v) Settings.MultiPoint = v end)
@@ -407,7 +416,6 @@ CreateToggle(aimPage, "Team Check",  Settings.AimbotTeamCheck, function(v) Setti
 CreateSlider(aimPage, "FOV Radius",  30, 600, Settings.FOV_RADIUS, function(v) Settings.FOV_RADIUS = v end)
 CreateSlider(aimPage, "Fire Rate (sec)", 0.1, 5, Settings.FIRE_RATE, function(v) Settings.FIRE_RATE = v end)
 
--- ─────────── Контент: Visuals ─────────── --
 CreateToggle(espPage, "ESP Master",   Settings.ESPEnabled,  function(v) Settings.ESPEnabled  = v end)
 CreateToggle(espPage, "Show Names",   Settings.ShowNames,   function(v) Settings.ShowNames   = v end)
 CreateToggle(espPage, "Show Health",  Settings.ShowHealth,  function(v) Settings.ShowHealth  = v end)
@@ -415,17 +423,17 @@ CreateToggle(espPage, "Show Chams",   Settings.ShowChams,   function(v) Settings
 CreateToggle(espPage, "Team Check",   Settings.ESPTeamCheck,function(v) Settings.ESPTeamCheck= v end)
 CreateSlider(espPage, "Max Distance", 100, 5000, Settings.MaxDistance, function(v) Settings.MaxDistance = v end)
 
--- ─────────── Контент: Rage ─────────── --
 CreateToggle(ragePage, "Anti-Aim (Jitter)", Settings.JitterEnabled, function(v) Settings.JitterEnabled = v end)
 CreateSlider(ragePage, "Jitter Degree", 10, 180, Settings.JitterDegree, function(v) Settings.JitterDegree = v end)
 CreateSlider(ragePage, "Jitter Speed", 5, 100, Settings.JitterSpeed, function(v) Settings.JitterSpeed = v end)
 
--- ─────────── Контент: Misc (ИНТЕГРАЦИЯ ТРЕТЬЕГО ЛИЦА) ─────────── --
-CreateToggle(miscPage, "Third Person Enabled", Settings.TP_Enabled, function(v) 
-    Settings.TP_Enabled = v 
+CreateToggle(miscPage, "Third Person Enabled", Settings.TP_Enabled, function(v)
+    Settings.TP_Enabled = v
     if not v then
-        -- Возврат в 1-е лицо при выключении
-        LocalPlayer.CameraMode = Enum.CameraMode.LockFirstPerson
+        LocalPlayer.CameraMode = Enum.CameraMode.Classic
+        LocalPlayer.CameraMaxZoomDistance = defaultMaxZoom
+        LocalPlayer.CameraMinZoomDistance = defaultMinZoom
+        UserInputService.MouseBehavior = Enum.MouseBehavior.Default
         local char = LocalPlayer.Character
         if char then
             for _, part in pairs(char:GetDescendants()) do
@@ -437,31 +445,68 @@ end)
 CreateSlider(miscPage, "TP Distance", 2, 50, Settings.TP_Distance, function(v) Settings.TP_Distance = v end)
 CreateSlider(miscPage, "Character Transparency", 0, 1, Settings.TP_Transparency, function(v) Settings.TP_Transparency = v end)
 
--- ──────────────────────── AUTO FIRE ─────────────────── --
+-- ──────────────────── AUTO FIRE (SILENT RETURN) ───────────────────────── --
 local function DoAutoFire(target)
     if Settings.IsFiring then return end
     if not target or not target.Parent then return end
     Settings.IsFiring = true
     Settings.LastShotTime = tick()
     local ok = pcall(function()
-        local savedCF = Camera.CFrame
-        Camera.CFrame = CFrame.new(Camera.CFrame.Position, target.Position)
+        -- Сохраняем CFrame ДО рывка камеры
+        local originalCFrame = Camera.CFrame
+
+        -- Наводим камеру на цель
+        local lookTarget = GetAimLookTarget(target.Position)
+        Camera.CFrame = CFrame.new(Camera.CFrame.Position, lookTarget)
         task.wait(0.01)
+
         if target and target.Parent then
-            if mouse1press then mouse1press() task.wait(0.01) mouse1release()
+            if mouse1press then
+                mouse1press()
+                task.wait(0.01)
+                mouse1release()
             else
                 local char = LocalPlayer.Character
-                if char then local tool = char:FindFirstChildOfClass("Tool")
+                if char then
+                    local tool = char:FindFirstChildOfClass("Tool")
                     if tool then safe(function() tool:Activate() end) end
                 end
             end
         end
-        task.defer(function() safe(function() Camera.CFrame = savedCF end) end)
+
+        -- Запускаем плавный silent return к исходной позиции камеры
+        Settings.SilentReturnCFrame = originalCFrame
+        Settings.SilentReturnFrames = 5
     end)
     Settings.IsFiring = false
 end
 
--- ─────────────────────── ANTI-AIM & ТРЕТЬЕ ЛИЦО (ПРИОРИТЕТНЫЙ ЦИКЛ) ─────────── --
+-- ──── Silent Return: плавно возвращает камеру после автовыстрела ─────── --
+-- Запускается ПОСЛЕ системы камеры (Camera+2), чтобы не конфликтовать
+RunService:BindToRenderStep("HVH_SilentReturn", Enum.RenderPriority.Camera.Value + 2, function()
+    if not (Settings.SilentReturnCFrame and Settings.SilentReturnFrames > 0) then return end
+
+    -- Прерываем если началась новая стрельба
+    if Settings.IsFiring then
+        Settings.SilentReturnCFrame = nil
+        Settings.SilentReturnFrames = 0
+        return
+    end
+
+    Settings.SilentReturnFrames = Settings.SilentReturnFrames - 1
+
+    -- Если игрок зажал мышь — не перебиваем его прицел, просто тикаем счётчик
+    if not UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
+        -- alpha 0.6: ~99% возврата за 5 кадров (~83мс на 60fps) — почти незаметно
+        Camera.CFrame = Camera.CFrame:Lerp(Settings.SilentReturnCFrame, 0.6)
+    end
+
+    if Settings.SilentReturnFrames <= 0 then
+        Settings.SilentReturnCFrame = nil
+    end
+end)
+
+-- ─────────────────── ANTI-AIM & TP ─────────────────────────────────────── --
 local wasJittering = false
 RunService:BindToRenderStep("HVH_AntiAim_TP", Enum.RenderPriority.Camera.Value + 1, function()
     local char = LocalPlayer.Character
@@ -470,16 +515,14 @@ RunService:BindToRenderStep("HVH_AntiAim_TP", Enum.RenderPriority.Camera.Value +
     local hum = char:FindFirstChildOfClass("Humanoid")
     if not root or not hum or hum.Health <= 0 then return end
 
-    -- Объединенная логика поворота: работает для TP, Jitter или для обоих сразу
     if Settings.JitterEnabled or Settings.TP_Enabled then
         local camCF = Camera.CFrame
         local flatLook = Vector3.new(camCF.LookVector.X, 0, camCF.LookVector.Z)
-        
-        -- Предохранитель, если смотрим строго вверх/вниз
+
         if flatLook.Magnitude > 0.1 then
             flatLook = flatLook.Unit
             local yOffset = 0
-            
+
             if Settings.JitterEnabled then
                 if hum.AutoRotate then hum.AutoRotate = false end
                 wasJittering = true
@@ -506,22 +549,25 @@ end)
 RunService.RenderStepped:Connect(function()
     safe(UpdateESP)
 
-    -- ЛОГИКА ТРЕТЬЕГО ЛИЦА (Только камера и визуал, поворот перенесен в BindToRenderStep выше)
+    -- THIRD PERSON LOGIC
     if Settings.TP_Enabled then
         safe(function()
             local char = LocalPlayer.Character
             if char and char:FindFirstChild("HumanoidRootPart") then
-                -- 1. Режим камеры и зум
                 LocalPlayer.CameraMode = Enum.CameraMode.Classic
                 LocalPlayer.CameraMaxZoomDistance = Settings.TP_Distance
                 LocalPlayer.CameraMinZoomDistance = Settings.TP_Distance
-                -- 2. Фикс курсора
-                UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
-                -- 3. Прозрачность тела
+
+                -- ФИКС: меню открыто → курсор свободен; меню закрыто → TP работает нормально
+                if MainFrame.Visible then
+                    UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+                else
+                    UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+                end
+
                 for _, part in pairs(char:GetDescendants()) do
                     if part:IsA("BasePart") then part.LocalTransparencyModifier = Settings.TP_Transparency end
                 end
-                -- 4. Чистка Viewmodel (рук) в камере
                 for _, obj in pairs(Camera:GetChildren()) do
                     if obj:IsA("Model") or obj:IsA("BasePart") then
                         for _, p in pairs(obj:GetDescendants()) do
@@ -556,17 +602,16 @@ RunService.RenderStepped:Connect(function()
 
     if UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) and target then
         safe(function()
-            if not Settings.isSnapped then
-                local tCF = CFrame.new(Camera.CFrame.Position, target.Position)
-                Settings.snapOffset = tCF:ToObjectSpace(Camera.CFrame)
-                Camera.CFrame  = tCF
-                Settings.isSnapped = true
-            else
-                Camera.CFrame  = Camera.CFrame:ToWorldSpace(Settings.snapOffset)
-                Settings.isSnapped = false
-            end
+            -- Отменяем silent return если игрок сам зажал мышь
+            Settings.SilentReturnCFrame = nil
+            Settings.SilentReturnFrames = 0
+            local lookTarget = GetAimLookTarget(target.Position)
+            Camera.CFrame = CFrame.new(Camera.CFrame.Position, lookTarget)
+            Settings.isSnapped = true
         end)
-    else Settings.isSnapped = false end
+    else
+        Settings.isSnapped = false
+    end
 
     if Settings.AutoFire and target and not Settings.IsFiring then
         if (tick() - Settings.LastShotTime) >= Settings.FIRE_RATE then

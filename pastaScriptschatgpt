@@ -45,6 +45,11 @@ local Settings = {
     JitterDegree     = 65,
     JitterSpeed      = 45,
 
+    -- Новые настройки для Pitch Anti-Aim (взгляд вниз через мышь)
+    HeadDownEnabled  = false,   -- Тумблер включения
+    HeadDownPitch    = 90,      -- Угол наклона (90 = строго в пол)
+    CurrentTarget    = nil,     -- Сюда аимбот будет слать текущую цель для отключения хука
+
     SilentReturnCFrame = nil,
     SilentReturnFrames = 0,
 
@@ -202,6 +207,7 @@ local function UpdateESP()
                     else
                         data.Health.Visible = false
                     end
+
                     if Settings.ShowChams then
                         local h = char:FindFirstChild("OBKAK_Highlight")
                         if not h then
@@ -234,45 +240,36 @@ local function UpdateESP()
     end
 end
 
--- ══════════════════════════════════════════════════════════════════
---                        COLOR PALETTE
--- ══════════════════════════════════════════════════════════════════
 local C = {
-    BG         = Color3.fromRGB(9,   9,  15),
-    BG2        = Color3.fromRGB(13,  13,  21),
-    Panel      = Color3.fromRGB(17,  17,  28),
-    Card       = Color3.fromRGB(21,  21,  35),
-    CardHov    = Color3.fromRGB(26,  26,  43),
-    Accent     = Color3.fromRGB(99,  102, 241),
-    AccentDim  = Color3.fromRGB(52,  54,  162),
-    Violet     = Color3.fromRGB(139, 92,  246),
-    VioletDim  = Color3.fromRGB(74,  48,  140),
-    Text       = Color3.fromRGB(218, 226, 242),
-    TextDim    = Color3.fromRGB(115, 128, 152),
-    TextMuted  = Color3.fromRGB(62,  72,  94),
-    GreenOn    = Color3.fromRGB(52,  211, 153),
-    YellowOn   = Color3.fromRGB(251, 191, 36),
-    SliderOff  = Color3.fromRGB(26,  26,  44),
-    Border     = Color3.fromRGB(33,  33,  54),
-    BorderAct  = Color3.fromRGB(72,  75,  195),
-    White      = Color3.new(1, 1, 1),
+    BG        = Color3.fromRGB(9,   9,  15),
+    BG2       = Color3.fromRGB(13,  13,  21),
+    Panel     = Color3.fromRGB(17,  17,  28),
+    Card      = Color3.fromRGB(21,  21,  35),
+    CardHov   = Color3.fromRGB(26,  26,  43),
+    Accent    = Color3.fromRGB(99,  102, 241),
+    AccentDim = Color3.fromRGB(52,  54,  162),
+    Violet    = Color3.fromRGB(139, 92,  246),
+    VioletDim = Color3.fromRGB(74,  48,  140),
+    Text      = Color3.fromRGB(218, 226, 242),
+    TextDim   = Color3.fromRGB(115, 128, 152),
+    TextMuted = Color3.fromRGB(62,  72,  94),
+    GreenOn   = Color3.fromRGB(52,  211, 153),
+    YellowOn  = Color3.fromRGB(251, 191, 36),
+    SliderOff = Color3.fromRGB(26,  26,  44),
+    Border    = Color3.fromRGB(33,  33,  54),
+    BorderAct = Color3.fromRGB(72,  75,  195),
+    White     = Color3.new(1, 1, 1),
 }
 
 local function Tw(obj, props, t)
     TweenService:Create(obj, TweenInfo.new(t or 0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), props):Play()
 end
 
--- ══════════════════════════════════════════════════════════════════
---                         GUI CLEANUP
--- ══════════════════════════════════════════════════════════════════
 safe(function()
     if CoreGui:FindFirstChild("HVH_OBKAK_Menu") then CoreGui.HVH_OBKAK_Menu:Destroy() end
     if CoreGui:FindFirstChild("SilentGui")       then CoreGui.SilentGui:Destroy()       end
 end)
 
--- ══════════════════════════════════════════════════════════════════
---                           FOV GUI
--- ══════════════════════════════════════════════════════════════════
 local fovGui = Instance.new("ScreenGui", CoreGui)
 fovGui.Name         = "SilentGui"
 fovGui.ResetOnSpawn = false
@@ -288,15 +285,11 @@ stroke.Color     = Color3.fromRGB(0, 255, 255)
 stroke.Thickness = 1.5
 Instance.new("UICorner", circle).CornerRadius = UDim.new(1, 0)
 
--- ══════════════════════════════════════════════════════════════════
---                        MAIN SCREENGUI
--- ══════════════════════════════════════════════════════════════════
 local ScreenGui = Instance.new("ScreenGui", CoreGui)
 ScreenGui.Name            = "HVH_OBKAK_Menu"
 ScreenGui.ResetOnSpawn    = false
 ScreenGui.ZIndexBehavior  = Enum.ZIndexBehavior.Sibling
 
--- ── Outer glow / shadow ─────────────────────────────────────────
 local GlowFrame = Instance.new("Frame", ScreenGui)
 GlowFrame.Size             = UDim2.new(0, 668, 0, 484)
 GlowFrame.Position         = UDim2.new(0.5, -334, 0.5, -242)
@@ -305,13 +298,12 @@ GlowFrame.BackgroundTransparency = 0.82
 GlowFrame.BorderSizePixel  = 0
 Instance.new("UICorner", GlowFrame).CornerRadius = UDim.new(0, 18)
 
--- ── Main Frame ──────────────────────────────────────────────────
 local MainFrame = Instance.new("Frame", ScreenGui)
 MainFrame.Size             = UDim2.new(0, 648, 0, 464)
 MainFrame.Position         = UDim2.new(0.5, -324, 0.5, -232)
 MainFrame.BackgroundColor3 = C.BG
 MainFrame.BorderSizePixel  = 0
-MainFrame.ClipsDescendants = true  -- ✅ ИСПРАВЛЕНО
+MainFrame.ClipsDescendants = true
 Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 14)
 
 local outerStroke = Instance.new("UIStroke", MainFrame)
@@ -319,16 +311,14 @@ outerStroke.Color     = C.AccentDim
 outerStroke.Thickness = 1
 outerStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 
--- ── Inner body ──────────────────────────────────────────────────
 local Inner = Instance.new("Frame", MainFrame)
 Inner.Size             = UDim2.new(1, -2, 1, -2)
 Inner.Position         = UDim2.new(0, 1, 0, 1)
 Inner.BackgroundColor3 = C.BG2
 Inner.BorderSizePixel  = 0
-Inner.ClipsDescendants = true  -- ✅ ИСПРАВЛЕНО
+Inner.ClipsDescendants = true
 Instance.new("UICorner", Inner).CornerRadius = UDim.new(0, 13)
 
--- Subtle top-left accent glow overlay
 local TopGlow = Instance.new("Frame", Inner)
 TopGlow.Size             = UDim2.new(0.55, 0, 0, 70)
 TopGlow.BackgroundColor3 = C.Accent
@@ -342,22 +332,18 @@ tgGrad.Transparency = NumberSequence.new({
 })
 Instance.new("UICorner", TopGlow).CornerRadius = UDim.new(0, 13)
 
--- ══════════════════════════════════════════════════════════════════
---                          TITLE BAR
--- ══════════════════════════════════════════════════════════════════
 local TBar = Instance.new("Frame", Inner)
 TBar.Size             = UDim2.new(1, 0, 0, 52)
 TBar.BackgroundColor3 = C.Panel
 TBar.BorderSizePixel  = 0
 Instance.new("UICorner", TBar).CornerRadius = UDim.new(0, 13)
--- patch bottom corners
+
 local TBarPatch = Instance.new("Frame", TBar)
 TBarPatch.Size             = UDim2.new(1, 0, 0, 14)
 TBarPatch.Position         = UDim2.new(0, 0, 1, -14)
 TBarPatch.BackgroundColor3 = C.Panel
 TBarPatch.BorderSizePixel  = 0
 
--- Accent left pill stripe
 local AccentStripe = Instance.new("Frame", TBar)
 AccentStripe.Size             = UDim2.new(0, 3, 0, 24)
 AccentStripe.Position         = UDim2.new(0, 14, 0.5, -12)
@@ -368,7 +354,6 @@ local asGrad = Instance.new("UIGradient", AccentStripe)
 asGrad.Color    = ColorSequence.new(C.Accent, C.Violet)
 asGrad.Rotation = 90
 
--- Title
 local TitleLabel = Instance.new("TextLabel", TBar)
 TitleLabel.Text           = "HVH OBKAK"
 TitleLabel.Size           = UDim2.new(0, 155, 1, 0)
@@ -379,7 +364,6 @@ TitleLabel.Font           = Enum.Font.GothamBold
 TitleLabel.BackgroundTransparency = 1
 TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
 
--- Badge tag
 local Badge = Instance.new("Frame", TBar)
 Badge.Size             = UDim2.new(0, 70, 0, 20)
 Badge.Position         = UDim2.new(0, 180, 0.5, -10)
@@ -389,14 +373,13 @@ Instance.new("UICorner", Badge).CornerRadius = UDim.new(0, 5)
 local BadgeGrad = Instance.new("UIGradient", Badge)
 BadgeGrad.Color    = ColorSequence.new(C.AccentDim, C.VioletDim)
 local BadgeLbl = Instance.new("TextLabel", Badge)
-BadgeLbl.Text           = "ultimate"
+BadgeLbl.Text          = "ultimate"
 BadgeLbl.Size           = UDim2.new(1, 0, 1, 0)
 BadgeLbl.TextColor3     = C.Accent
 BadgeLbl.TextSize       = 11
 BadgeLbl.Font           = Enum.Font.GothamBold
 BadgeLbl.BackgroundTransparency = 1
 
--- Version
 local VerLabel = Instance.new("TextLabel", TBar)
 VerLabel.Text           = "v 2.6"
 VerLabel.Size           = UDim2.new(0, 46, 1, 0)
@@ -407,7 +390,6 @@ VerLabel.Font           = Enum.Font.Gotham
 VerLabel.BackgroundTransparency = 1
 VerLabel.TextXAlignment = Enum.TextXAlignment.Right
 
--- Minimize button
 local MinBtn = Instance.new("TextButton", TBar)
 MinBtn.Size             = UDim2.new(0, 32, 0, 32)
 MinBtn.Position         = UDim2.new(1, -46, 0.5, -16)
@@ -443,7 +425,6 @@ MinBtn.MouseButton1Click:Connect(function()
     end
 end)
 
--- ── Gradient separator under title ──────────────────────────────
 local GradSep = Instance.new("Frame", Inner)
 GradSep.Size             = UDim2.new(1, -20, 0, 1)
 GradSep.Position         = UDim2.new(0, 10, 0, 52)
@@ -457,9 +438,6 @@ gSepGrad.Color = ColorSequence.new({
     ColorSequenceKeypoint.new(1,    Color3.fromRGB(9,9,15)),
 })
 
--- ══════════════════════════════════════════════════════════════════
---                           TAB BAR
--- ══════════════════════════════════════════════════════════════════
 local TabBar = Instance.new("Frame", Inner)
 TabBar.Size             = UDim2.new(1, 0, 0, 44)
 TabBar.Position         = UDim2.new(0, 0, 0, 53)
@@ -475,17 +453,68 @@ TabBorderLine.Position         = UDim2.new(0, 0, 0, 97)
 TabBorderLine.BackgroundColor3 = C.Border
 TabBorderLine.BorderSizePixel  = 0
 
--- ── Pages container ─────────────────────────────────────────────
 local Pages = Instance.new("Frame", Inner)
 Pages.Size             = UDim2.new(1, -14, 1, -108)
 Pages.Position         = UDim2.new(0, 7, 0, 100)
 Pages.BackgroundTransparency = 1
-Pages.ClipsDescendants = true  -- ✅ ИСПРАВЛЕНО
+Pages.ClipsDescendants = true
 
--- ══════════════════════════════════════════════════════════════════
---                        UI CONSTRUCTORS
--- ══════════════════════════════════════════════════════════════════
 local tabUnderlines = {}
+
+local function CreateTab(name)
+    local btn = Instance.new("TextButton", TabBar)
+    btn.Size            = UDim2.new(0, 110, 1, 0)
+    btn.BackgroundColor3 = C.Panel
+    btn.BorderSizePixel  = 0
+    btn.Text            = name
+    btn.TextColor3      = C.TextMuted
+    btn.Font            = Enum.Font.GothamBold
+    btn.TextSize        = 13
+
+    local ul = Instance.new("Frame", btn)
+    ul.Size             = UDim2.new(1, 0, 0, 2)
+    ul.Position         = UDim2.new(0, 0, 1, -2)
+    ul.BackgroundColor3 = C.Accent
+    ul.BackgroundTransparency = 1
+    local ulGrad = Instance.new("UIGradient", ul)
+    ulGrad.Color = ColorSequence.new(C.Accent, C.Violet)
+
+    local page = Instance.new("ScrollingFrame", Pages)
+    page.Size           = UDim2.new(1, 0, 1, 0)
+    page.BackgroundTransparency = 1
+    page.Visible        = false
+    page.ScrollBarThickness = 3
+    page.ScrollBarImageColor3 = C.Accent
+    page.ScrollBarImageTransparency = 0.4
+    page.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    page.CanvasSize     = UDim2.new(0, 0, 0, 0)
+    page.BorderSizePixel  = 0
+    local layout = Instance.new("UIListLayout", page)
+    layout.Padding = UDim.new(0, 5)
+    layout.SortOrder     = Enum.SortOrder.LayoutOrder
+    local padding = Instance.new("UIPadding", page)
+    padding.PaddingTop = UDim.new(0, 4)
+    padding.PaddingBottom = UDim.new(0, 8)
+    padding.PaddingLeft = UDim.new(0, 2)
+    padding.PaddingRight = UDim.new(0, 2)
+
+    table.insert(tabUnderlines, ul)
+
+    btn.MouseButton1Click:Connect(function()
+        for _, v in pairs(Pages:GetChildren()) do
+            if v:IsA("ScrollingFrame") then v.Visible = false end
+        end
+        for _, v in pairs(TabBar:GetChildren()) do
+            if v:IsA("TextButton") then Tw(v, {TextColor3 = C.TextMuted, BackgroundColor3 = C.Panel}) end
+        end
+        for _, u in pairs(tabUnderlines) do u.BackgroundTransparency = 1 end
+        page.Visible = true
+        Tw(btn, {TextColor3 = C.Text, BackgroundColor3 = Color3.fromRGB(22, 22, 36)})
+        ul.BackgroundTransparency = 0
+    end)
+
+    return page, btn, ul
+end
 
 local function CreateSectionLabel(parent, text)
     local f = Instance.new("Frame", parent)
@@ -570,7 +599,7 @@ local function CreateToggle(parent, text, default, callback)
     Instance.new("UICorner", thumb).CornerRadius = UDim.new(1, 0)
 
     local btn = Instance.new("TextButton", container)
-    btn.Size             = UDim2.new(1, 0, 1, 0)
+    btn.Size              = UDim2.new(1, 0, 1, 0)
     btn.BackgroundTransparency = 1
     btn.Text             = ""
 
@@ -677,7 +706,7 @@ local function CreateSlider(parent, text, minVal, maxVal, default, callback)
         end
     end)
     UserInputService.InputEnded:Connect(function(inp)
-        if inp.UserInputType == Enum.UserInputType.MouseButton1 and dragging then
+        if inp.UserInputType == Enum.UserInputType.MouseButton1 then
             dragging = false
             Settings.IsDraggingSlider = false
         end
@@ -686,227 +715,60 @@ local function CreateSlider(parent, text, minVal, maxVal, default, callback)
     return container
 end
 
-local function CreateTab(name)
-    local btn = Instance.new("TextButton", TabBar)
-    btn.Size             = UDim2.new(1/4, 0, 1, 0)
-    btn.BackgroundColor3 = C.Panel
-    btn.Text             = name
-    btn.TextColor3       = C.TextMuted
-    btn.Font             = Enum.Font.GothamSemibold
-    btn.TextSize         = 14
-    btn.BorderSizePixel  = 0
-
-    local ul = Instance.new("Frame", btn)
-    ul.Size             = UDim2.new(0.62, 0, 0, 2)
-    ul.AnchorPoint      = Vector2.new(0.5, 1)
-    ul.Position         = UDim2.new(0.5, 0, 1, -1)
-    ul.BackgroundColor3 = C.Accent
-    ul.BackgroundTransparency = 1
-    ul.BorderSizePixel  = 0
-    Instance.new("UICorner", ul).CornerRadius = UDim.new(1, 0)
-    local ulGrad = Instance.new("UIGradient", ul)
-    ulGrad.Color = ColorSequence.new(C.Accent, C.Violet)
-
-    local page = Instance.new("ScrollingFrame", Pages)
-    page.Size             = UDim2.new(1, 0, 1, 0)
-    page.Visible          = false
-    page.BackgroundTransparency = 1
-    page.ScrollBarThickness = 3
-    page.ScrollBarImageColor3 = C.Accent
-    page.ScrollBarImageTransparency = 0.4
-    page.AutomaticCanvasSize = Enum.AutomaticSize.Y
-    page.CanvasSize          = UDim2.new(0, 0, 0, 0)
-    page.BorderSizePixel     = 0
-
-    local layout = Instance.new("UIListLayout", page)
-    layout.Padding   = UDim.new(0, 5)
-    layout.SortOrder = Enum.SortOrder.LayoutOrder
-
-    local padding = Instance.new("UIPadding", page)
-    padding.PaddingTop    = UDim.new(0, 4)
-    padding.PaddingBottom = UDim.new(0, 8)
-    padding.PaddingLeft   = UDim.new(0, 2)
-    padding.PaddingRight  = UDim.new(0, 2)
-
-    table.insert(tabUnderlines, ul)
-
-    btn.MouseButton1Click:Connect(function()
-        for _, v in pairs(Pages:GetChildren()) do
-            if v:IsA("ScrollingFrame") then v.Visible = false end
-        end
-        for _, v in pairs(TabBar:GetChildren()) do
-            if v:IsA("TextButton") then
-                Tw(v, {TextColor3 = C.TextMuted, BackgroundColor3 = C.Panel})
-            end
-        end
-        for _, u in pairs(tabUnderlines) do
-            u.BackgroundTransparency = 1
-        end
-        page.Visible = true
-        Tw(btn, {TextColor3 = C.Text, BackgroundColor3 = Color3.fromRGB(22, 22, 36)})
-        ul.BackgroundTransparency = 0
-    end)
-
-    return page, btn, ul
-end
-
--- ══════════════════════════════════════════════════════════════════
---                            TABS
--- ══════════════════════════════════════════════════════════════════
 local aimPage, aimBtn, aimUL = CreateTab("Aimbot")
-local espPage                 = CreateTab("Visuals")
-local ragePage                = CreateTab("Rage")
-local miscPage                = CreateTab("Misc")
+local espPage = CreateTab("Visuals")
+local ragePage = CreateTab("Rage")
+local miscPage = CreateTab("Misc")
 
 -- ══════════════════════════════════════════════════════════════════
---                         AIMBOT PAGE
+--                        AIMBOT PAGE
 -- ══════════════════════════════════════════════════════════════════
 CreateSectionLabel(aimPage, "GENERAL")
-CreateToggle(aimPage, "Aimbot Enabled", Settings.AimbotEnabled, function(v)
-    Settings.AimbotEnabled = v
-    circle.Visible = v
-end)
+CreateToggle(aimPage, "Aimbot Enabled", Settings.AimbotEnabled, function(v) Settings.AimbotEnabled = v circle.Visible = v end)
 CreateToggle(aimPage, "Wall Check", Settings.AimbotWallCheck, function(v) Settings.AimbotWallCheck = v end)
 CreateToggle(aimPage, "Team Check", Settings.AimbotTeamCheck, function(v) Settings.AimbotTeamCheck = v end)
 CreateSlider(aimPage, "FOV Radius", 30, 600, Settings.FOV_RADIUS, function(v) Settings.FOV_RADIUS = v end)
 
 CreateSectionLabel(aimPage, "TARGETING")
 CreateToggle(aimPage, "Fix Aim (Peek Fix)", Settings.FixAim, function(v) Settings.FixAim = v end)
-CreateToggle(aimPage, "Fix MultiPoint",     Settings.MultiPoint, function(v) Settings.MultiPoint = v end)
+CreateToggle(aimPage, "Fix MultiPoint", Settings.MultiPoint, function(v) Settings.MultiPoint = v end)
 
--- Target Part cycle button
 local HBOuter = Instance.new("Frame", aimPage)
-HBOuter.Size             = UDim2.new(1, 0, 0, 40)
+HBOuter.Size = UDim2.new(1, 0, 0, 40)
 HBOuter.BackgroundColor3 = C.Card
-HBOuter.BorderSizePixel  = 0
+HBOuter.BorderSizePixel = 0
 Instance.new("UICorner", HBOuter).CornerRadius = UDim.new(0, 10)
 Instance.new("UIStroke", HBOuter).Color = C.Border
-
 local HBLabel = Instance.new("TextLabel", HBOuter)
-HBLabel.Text           = "Target Part"
-HBLabel.Size           = UDim2.new(0.5, 0, 1, 0)
-HBLabel.Position       = UDim2.new(0, 16, 0, 0)
-HBLabel.TextColor3     = C.TextDim
-HBLabel.TextSize       = 14
-HBLabel.Font           = Enum.Font.GothamSemibold
+HBLabel.Text = "Target Part"
+HBLabel.Size = UDim2.new(0.5, 0, 1, 0)
+HBLabel.Position = UDim2.new(0, 16, 0, 0)
+HBLabel.TextColor3 = C.TextDim
+HBLabel.TextSize = 14
+HBLabel.Font = Enum.Font.GothamSemibold
 HBLabel.BackgroundTransparency = 1
 HBLabel.TextXAlignment = Enum.TextXAlignment.Left
 
 local HitboxBtn = Instance.new("TextButton", HBOuter)
-HitboxBtn.Size             = UDim2.new(0, 96, 0, 26)
-HitboxBtn.Position         = UDim2.new(1, -110, 0.5, -13)
-HitboxBtn.BackgroundColor3 = C.AccentDim
-HitboxBtn.Text             = "Head"
-HitboxBtn.TextColor3       = C.Text
-HitboxBtn.TextSize         = 13
-HitboxBtn.Font             = Enum.Font.GothamSemibold
-HitboxBtn.BorderSizePixel  = 0
-Instance.new("UICorner", HitboxBtn).CornerRadius = UDim.new(0, 7)
+HitboxBtn.Size = UDim2.new(0, 96, 0, 26)
+HitboxBtn.Position = UDim2.new(1, -110, 0.5, -13)
+HitboxBtn.BackgroundColor3 = C.Panel
+HitboxBtn.Text = Settings.TARGET_LIST[Settings.CurrentPartIndex]
+HitboxBtn.TextColor3 = C.Text
+HitboxBtn.Font = Enum.Font.GothamBold
+HitboxBtn.TextSize = 12
+Instance.new("UICorner", HitboxBtn).CornerRadius = UDim.new(0, 6)
+local hbStroke = Instance.new("UIStroke", HitboxBtn)
+hbStroke.Color = C.Border
 
 HitboxBtn.MouseButton1Click:Connect(function()
-    Settings.CurrentPartIndex = Settings.CurrentPartIndex % #Settings.TARGET_LIST + 1
+    Settings.CurrentPartIndex = Settings.CurrentPartIndex + 1
+    if Settings.CurrentPartIndex > #Settings.TARGET_LIST then Settings.CurrentPartIndex = 1 end
     Settings.TARGET_PART = Settings.TARGET_LIST[Settings.CurrentPartIndex]
     HitboxBtn.Text = Settings.TARGET_PART
 end)
 
-CreateSectionLabel(aimPage, "AUTOFIRE")
-CreateToggle(aimPage, "Auto Fire", Settings.AutoFire, function(v)
-    Settings.AutoFire = v
-    if not v then
-        if Settings._prefireActive then
-            if Settings._prefireOriginalCF then
-                Settings.SilentReturnCFrame = Settings._prefireOriginalCF
-                Settings.SilentReturnFrames = 5
-            end
-            Settings._prefireActive     = false
-            Settings._prefireTarget     = nil
-            Settings._prefireFrames     = 0
-            Settings._prefireOriginalCF = nil
-        end
-    end
-end)
-CreateToggle(aimPage, "Adaptive Fire (Auto-tune)", Settings.AdaptiveFireEnabled, function(v)
-    Settings.AdaptiveFireEnabled = v
-end)
-
--- Stability info card
-local stabCard = Instance.new("Frame", aimPage)
-stabCard.Size             = UDim2.new(1, 0, 0, 36)
-stabCard.BackgroundColor3 = Color3.fromRGB(13, 13, 22)
-stabCard.BorderSizePixel  = 0
-Instance.new("UICorner", stabCard).CornerRadius = UDim.new(0, 10)
-local stabStroke = Instance.new("UIStroke", stabCard)
-stabStroke.Color     = C.GreenOn
-stabStroke.Thickness = 1
-stabStroke.Transparency = 0.4
-
-local stabDot = Instance.new("Frame", stabCard)
-stabDot.Size             = UDim2.new(0, 6, 0, 6)
-stabDot.Position         = UDim2.new(0, 13, 0.5, -3)
-stabDot.BackgroundColor3 = C.GreenOn
-stabDot.BorderSizePixel  = 0
-Instance.new("UICorner", stabDot).CornerRadius = UDim.new(1, 0)
-
-local stabilityLabel = Instance.new("TextLabel", stabCard)
-stabilityLabel.Size                  = UDim2.new(1, -34, 1, 0)
-stabilityLabel.Position              = UDim2.new(0, 26, 0, 0)
-stabilityLabel.BackgroundTransparency = 1
-stabilityLabel.Text                  = "Stability: 3 frames [auto]"
-stabilityLabel.TextColor3            = C.GreenOn
-stabilityLabel.TextSize              = 13
-stabilityLabel.Font                  = Enum.Font.Gotham
-stabilityLabel.TextXAlignment        = Enum.TextXAlignment.Left
-
-CreateSlider(aimPage, "Manual Stability Frames", 0, 10, Settings.ManualStabilityFrames, function(v)
-    Settings.ManualStabilityFrames = v
-end)
-CreateSlider(aimPage, "Fire Rate (sec)", 0.1, 5, Settings.FIRE_RATE, function(v) Settings.FIRE_RATE = v end)
-
--- ══════════════════════════════════════════════════════════════════
---                         VISUALS PAGE
--- ══════════════════════════════════════════════════════════════════
-CreateSectionLabel(espPage, "RENDERING")
-CreateToggle(espPage, "ESP Master",  Settings.ESPEnabled,   function(v) Settings.ESPEnabled   = v end)
-CreateToggle(espPage, "Show Names",  Settings.ShowNames,    function(v) Settings.ShowNames    = v end)
-CreateToggle(espPage, "Show Health", Settings.ShowHealth,   function(v) Settings.ShowHealth   = v end)
-CreateToggle(espPage, "Show Chams",  Settings.ShowChams,    function(v) Settings.ShowChams    = v end)
-CreateSectionLabel(espPage, "FILTERS")
-CreateToggle(espPage, "Team Check",  Settings.ESPTeamCheck, function(v) Settings.ESPTeamCheck = v end)
-CreateSlider(espPage, "Max Distance", 100, 5000, Settings.MaxDistance, function(v) Settings.MaxDistance = v end)
-
--- ══════════════════════════════════════════════════════════════════
---                          RAGE PAGE
--- ══════════════════════════════════════════════════════════════════
-CreateSectionLabel(ragePage, "ANTI-AIM")
-CreateToggle(ragePage, "Jitter Anti-Aim", Settings.JitterEnabled, function(v) Settings.JitterEnabled = v end)
-CreateSlider(ragePage, "Jitter Degree", 10, 180, Settings.JitterDegree, function(v) Settings.JitterDegree = v end)
-CreateSlider(ragePage, "Jitter Speed",   5, 100, Settings.JitterSpeed,  function(v) Settings.JitterSpeed  = v end)
-
--- ══════════════════════════════════════════════════════════════════
---                          MISC PAGE
--- ══════════════════════════════════════════════════════════════════
-CreateSectionLabel(miscPage, "THIRD PERSON")
-CreateToggle(miscPage, "Third Person Enabled", Settings.TP_Enabled, function(v)
-    Settings.TP_Enabled = v
-    if not v then
-        LocalPlayer.CameraMode = Enum.CameraMode.Classic
-        LocalPlayer.CameraMaxZoomDistance = defaultMaxZoom
-        LocalPlayer.CameraMinZoomDistance = defaultMinZoom
-        UserInputService.MouseBehavior = Enum.MouseBehavior.Default
-        local char = LocalPlayer.Character
-        if char then
-            for _, part in pairs(char:GetDescendants()) do
-                if part:IsA("BasePart") then part.LocalTransparencyModifier = 0 end
-            end
-        end
-    end
-end)
-CreateSlider(miscPage, "TP Distance",           2,  50, Settings.TP_Distance,    function(v) Settings.TP_Distance    = v end)
-CreateSlider(miscPage, "Character Transparency", 0,   1, Settings.TP_Transparency,function(v) Settings.TP_Transparency = v end)
-
--- ══════════════════════════════════════════════════════════════════
---               AUTO FIRE: Pre-Snapped Shot
--- ══════════════════════════════════════════════════════════════════
+CreateSectionLabel(aimPage, "AUTOMATION")
 local function DoAutoFirePreSnapped(originalCF)
     if Settings.IsFiring then return end
     Settings.IsFiring = true
@@ -931,8 +793,76 @@ local function DoAutoFirePreSnapped(originalCF)
     Settings.IsFiring = false
 end
 
+CreateToggle(aimPage, "Adaptive Fire (Auto-tune)", Settings.AdaptiveFireEnabled, function(v) Settings.AdaptiveFireEnabled = v end)
+
+local stabCard = Instance.new("Frame", aimPage)
+stabCard.Size = UDim2.new(1, 0, 0, 36)
+stabCard.BackgroundColor3 = Color3.fromRGB(13, 13, 22)
+stabCard.BorderSizePixel = 0
+Instance.new("UICorner", stabCard).CornerRadius = UDim.new(0, 10)
+local stabStroke = Instance.new("UIStroke", stabCard)
+stabStroke.Color = C.GreenOn
+stabStroke.Thickness = 1
+stabStroke.Transparency = 0.4
+local stabDot = Instance.new("Frame", stabCard)
+stabDot.Size = UDim2.new(0, 6, 0, 6)
+stabDot.Position = UDim2.new(0, 13, 0.5, -3)
+stabDot.BackgroundColor3 = C.GreenOn
+stabDot.BorderSizePixel = 0
+Instance.new("UICorner", stabDot).CornerRadius = UDim.new(1, 0)
+local stabilityLabel = Instance.new("TextLabel", stabCard)
+stabilityLabel.Size = UDim2.new(1, -34, 1, 0)
+stabilityLabel.Position = UDim2.new(0, 26, 0, 0)
+stabilityLabel.BackgroundTransparency = 1
+stabilityLabel.Text = "Stability: 3 frames [auto]"
+stabilityLabel.TextColor3 = C.GreenOn
+stabilityLabel.TextSize = 13
+stabilityLabel.Font = Enum.Font.Gotham
+stabilityLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+CreateSlider(aimPage, "Manual Stability Frames", 0, 10, Settings.ManualStabilityFrames, function(v) Settings.ManualStabilityFrames = v end)
+CreateSlider(aimPage, "Fire Rate (sec)", 0.1, 5, Settings.FIRE_RATE, function(v) Settings.FIRE_RATE = v end)
+
 -- ══════════════════════════════════════════════════════════════════
---                       SILENT RETURN
+--                        VISUALS PAGE
+-- ══════════════════════════════════════════════════════════════════
+CreateSectionLabel(espPage, "RENDERING")
+CreateToggle(espPage, "ESP Master", Settings.ESPEnabled, function(v) Settings.ESPEnabled = v end)
+CreateToggle(espPage, "Show Names", Settings.ShowNames, function(v) Settings.ShowNames = v end)
+CreateToggle(espPage, "Show Health", Settings.ShowHealth, function(v) Settings.ShowHealth = v end)
+CreateToggle(espPage, "Show Chams", Settings.ShowChams, function(v) Settings.ShowChams = v end)
+CreateSectionLabel(espPage, "FILTERS")
+CreateToggle(espPage, "Team Check", Settings.ESPTeamCheck, function(v) Settings.ESPTeamCheck = v end)
+CreateSlider(espPage, "Max Distance", 100, 5000, Settings.MaxDistance, function(v) Settings.MaxDistance = v end)
+
+-- ══════════════════════════════════════════════════════════════════
+--                        RAGE PAGE
+-- ══════════════════════════════════════════════════════════════════
+CreateSectionLabel(ragePage, "ANTI-AIM")
+CreateToggle(ragePage, "Jitter Anti-Aim", Settings.JitterEnabled, function(v) Settings.JitterEnabled = v end)
+CreateSlider(ragePage, "Jitter Degree", 10, 180, Settings.JitterDegree, function(v) Settings.JitterDegree = v end)
+CreateSlider(ragePage, "Jitter Speed", 5, 100, Settings.JitterSpeed, function(v) Settings.JitterSpeed = v end)
+
+-- ✅ ДОБАВЛЕНО: Интерфейс для Pitch Mouse Anti-Aim в Rage таб
+CreateToggle(ragePage, "Pitch Mouse Anti-Aim", Settings.HeadDownEnabled, function(v) Settings.HeadDownEnabled = v end)
+CreateSlider(ragePage, "Pitch Angle (Degree)", 0, 90, Settings.HeadDownPitch, function(v) Settings.HeadDownPitch = v end)
+
+-- ══════════════════════════════════════════════════════════════════
+--                        MISC PAGE
+-- ══════════════════════════════════════════════════════════════════
+CreateSectionLabel(miscPage, "THIRD PERSON")
+CreateToggle(miscPage, "TP Enabled", Settings.TP_Enabled, function(v)
+    Settings.TP_Enabled = v
+    if not v then
+        LocalPlayer.CameraMaxZoomDistance = defaultMaxZoom
+        LocalPlayer.CameraMinZoomDistance = defaultMinZoom
+    end
+end)
+CreateSlider(miscPage, "TP Distance", 5, 50, Settings.TP_Distance, function(v) Settings.TP_Distance = v end)
+CreateSlider(miscPage, "Transparency", 0.1, 1, Settings.TP_Transparency, function(v) Settings.TP_Transparency = v end)
+
+-- ══════════════════════════════════════════════════════════════════
+--                        SILENT RETURN
 -- ══════════════════════════════════════════════════════════════════
 RunService:BindToRenderStep("HVH_SilentReturn", Enum.RenderPriority.Camera.Value + 2, function()
     if not (Settings.SilentReturnCFrame and Settings.SilentReturnFrames > 0) then return end
@@ -945,24 +875,22 @@ RunService:BindToRenderStep("HVH_SilentReturn", Enum.RenderPriority.Camera.Value
     if not UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
         Camera.CFrame = Camera.CFrame:Lerp(Settings.SilentReturnCFrame, 0.6)
     end
-    if Settings.SilentReturnFrames <= 0 then
-        Settings.SilentReturnCFrame = nil
-    end
+    if Settings.SilentReturnFrames <= 0 then Settings.SilentReturnCFrame = nil end
 end)
 
 -- ══════════════════════════════════════════════════════════════════
---                     ANTI-AIM & THIRD PERSON
+--                        ANTI-AIM & THIRD PERSON
 -- ══════════════════════════════════════════════════════════════════
 local wasJittering = false
 RunService:BindToRenderStep("HVH_AntiAim_TP", Enum.RenderPriority.Camera.Value + 1, function()
     local char = LocalPlayer.Character
     if not char then return end
     local root = char:FindFirstChild("HumanoidRootPart")
-    local hum  = char:FindFirstChildOfClass("Humanoid")
+    local hum = char:FindFirstChildOfClass("Humanoid")
     if not root or not hum or hum.Health <= 0 then return end
 
     if Settings.JitterEnabled or Settings.TP_Enabled then
-        local camCF    = Camera.CFrame
+        local camCF = Camera.CFrame
         local flatLook = Vector3.new(camCF.LookVector.X, 0, camCF.LookVector.Z)
         if flatLook.Magnitude > 0.1 then
             flatLook = flatLook.Unit
@@ -983,61 +911,80 @@ RunService:BindToRenderStep("HVH_AntiAim_TP", Enum.RenderPriority.Camera.Value +
 end)
 
 -- ══════════════════════════════════════════════════════════════════
---                          MAIN LOOP
+--             ✅ ДОБАВЛЕНО: УМНЫЙ ХУК МЫШКИ (PITCH ANTI-AIM)
+-- ══════════════════════════════════════════════════════════════════
+local Mouse = LocalPlayer:GetMouse()
+local oldIndex
+oldIndex = hookmetamethod(game, "__index", function(self, key)
+    if self == Mouse and (key == "Hit" or key == "hit") then
+        if not checkcaller() and Settings.HeadDownEnabled then
+            -- МГНОВЕННО ОТКЛЮЧАЕМ ПОДМЕНУ, ЕСЛИ:
+            -- 1. Аимбот видит врага в FOV (Settings.CurrentTarget)
+            -- 2. Идет анимация наведения/стабилизации (_prefireActive)
+            -- 3. Выполняется функция симуляции клика (IsFiring / isSnapped)
+            -- 4. Зажата физическая кнопка мыши (MouseButton1)
+            if Settings.IsFiring or Settings.isSnapped or Settings._prefireActive or Settings.CurrentTarget or UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
+                return oldIndex(self, key)
+            end
+            
+            local character = LocalPlayer.Character
+            local root = character and (character:FindFirstChild("HumanoidRootPart") or character:FindFirstChild("Torso"))
+            
+            if root then
+                -- Динамический расчет точки на основе ползунка (Settings.HeadDownPitch)
+                -- 90 градусов = строго под ноги. 0 градусов = прямо перед собой.
+                local angle = math.rad(Settings.HeadDownPitch or 90)
+                local forwardComponent = math.cos(angle)
+                local downComponent = math.sin(angle)
+                
+                local targetPos = root.Position + (root.CFrame.LookVector * forwardComponent * 10) - (Vector3.new(0, 1, 0) * downComponent * 10)
+                return CFrame.new(targetPos)
+            end
+        end
+    end
+    return oldIndex(self, key)
+end)
+
+-- ══════════════════════════════════════════════════════════════════
+--                        MAIN LOOP
 -- ══════════════════════════════════════════════════════════════════
 RunService.RenderStepped:Connect(function()
     safe(UpdateESP)
 
-    -- Update stability label
     safe(function()
         if Settings.AdaptiveFireEnabled then
-            local statusStr = Settings._prefireActive
-                and (" | pre: " .. Settings._prefireFrames .. "/" .. Settings._adaptiveStability)
-                or ""
-            stabilityLabel.Text      = "Stability: " .. Settings._adaptiveStability .. " frames [auto" .. statusStr .. "]"
-            stabilityLabel.TextColor3 = Color3.fromRGB(100, 200, 100)
+            local statusStr = Settings._prefireActive and (" | pre: " .. Settings._prefireFrames .. "/" .. Settings._adaptiveStability) or ""
+            stabilityLabel.Text = "Stability: " .. Settings._adaptiveStability .. " frames [auto]" .. statusStr
         else
-            stabilityLabel.Text      = "Stability: " .. Settings.ManualStabilityFrames .. " frames [manual]"
-            stabilityLabel.TextColor3 = Color3.fromRGB(200, 200, 100)
+            stabilityLabel.Text = "Stability: " .. Settings.ManualStabilityFrames .. " frames [manual]"
         end
-    end)
-
-    -- Third Person
-    if Settings.TP_Enabled then
-        safe(function()
+        if Settings.TP_Enabled and LocalPlayer.Character then
             local char = LocalPlayer.Character
-            if char and char:FindFirstChild("HumanoidRootPart") then
-                LocalPlayer.CameraMode = Enum.CameraMode.Classic
-                LocalPlayer.CameraMaxZoomDistance = Settings.TP_Distance
-                LocalPlayer.CameraMinZoomDistance = Settings.TP_Distance
-                if MainFrame.Visible then
-                    UserInputService.MouseBehavior = Enum.MouseBehavior.Default
-                else
-                    UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
-                end
-                for _, part in pairs(char:GetDescendants()) do
-                    if part:IsA("BasePart") then part.LocalTransparencyModifier = Settings.TP_Transparency end
-                end
-                for _, obj in pairs(Camera:GetChildren()) do
-                    if obj:IsA("Model") or obj:IsA("BasePart") then
-                        for _, p in pairs(obj:GetDescendants()) do
-                            if p:IsA("BasePart") then p.LocalTransparencyModifier = 1 end
-                        end
+            LocalPlayer.CameraMaxZoomDistance = Settings.TP_Distance
+            LocalPlayer.CameraMinZoomDistance = Settings.TP_Distance
+            for _, part in pairs(char:GetDescendants()) do
+                if part:IsA("BasePart") then part.LocalTransparencyModifier = Settings.TP_Transparency end
+            end
+            for _, obj in pairs(Camera:GetChildren()) do
+                if obj:IsA("Model") or obj:IsA("BasePart") then
+                    for _, p in pairs(obj:GetDescendants()) do
+                        if p:IsA("BasePart") then p.LocalTransparencyModifier = 1 end
                     end
                 end
             end
-        end)
-    end
+        end
+    end)
 
     if not Settings.AimbotEnabled then
+        Settings.CurrentTarget = nil -- Сбрасываем цель
         if Settings._prefireActive then
             if Settings._prefireOriginalCF then
                 Settings.SilentReturnCFrame = Settings._prefireOriginalCF
                 Settings.SilentReturnFrames = 5
             end
-            Settings._prefireActive     = false
-            Settings._prefireTarget     = nil
-            Settings._prefireFrames     = 0
+            Settings._prefireActive = false
+            Settings._prefireTarget = nil
+            Settings._prefireFrames = 0
             Settings._prefireOriginalCF = nil
         end
         return
@@ -1056,30 +1003,38 @@ RunService.RenderStepped:Connect(function()
             if Settings.AimbotTeamCheck and p.Team == LocalPlayer.Team then return end
             local part = getBestPart(p.Character)
             if not part then return end
+
             local pos, onScreen = Camera:WorldToViewportPoint(part.Position)
             if not onScreen then return end
+
             local mag = (Vector2.new(pos.X, pos.Y) - viewCenter).Magnitude
-            if mag < minDist then minDist = mag; target = part end
+            if mag < minDist then
+                minDist = mag
+                target = part
+            end
         end)
     end
+
+    -- ✅ СИНХРОНИЗАЦИЯ: Отдаем цель в глобальные настройки для хука мыши
+    Settings.CurrentTarget = target 
 
     if Settings._prefireActive and Settings._prefireTarget ~= target then
         if Settings._prefireOriginalCF then
             Settings.SilentReturnCFrame = Settings._prefireOriginalCF
             Settings.SilentReturnFrames = 5
         end
-        Settings._prefireActive     = false
-        Settings._prefireTarget     = nil
-        Settings._prefireFrames     = 0
+        Settings._prefireActive = false
+        Settings._prefireTarget = nil
+        Settings._prefireFrames = 0
         Settings._prefireOriginalCF = nil
     end
 
     if UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) and target then
         safe(function()
             if Settings._prefireActive then
-                Settings._prefireActive     = false
-                Settings._prefireTarget     = nil
-                Settings._prefireFrames     = 0
+                Settings._prefireActive = false
+                Settings._prefireTarget = nil
+                Settings._prefireFrames = 0
                 Settings._prefireOriginalCF = nil
             end
             Settings.SilentReturnCFrame = nil
@@ -1090,16 +1045,15 @@ RunService.RenderStepped:Connect(function()
         end)
     else
         Settings.isSnapped = false
-
         safe(function()
             if Settings._shotCheckTarget then
                 if not Settings._shotCheckTarget.Parent then
                     Settings._adaptiveStability = math.max(Settings._adaptiveMin, Settings._adaptiveStability - 1)
                     Settings._shotCheckTarget = nil
-                elseif (tick() - Settings._shotCheckTime) >= 0.2 then
+                elseif (tick() - Settings._shotCheckTime) >= 0.25 then
                     local hum = Settings._shotCheckTarget.Parent:FindFirstChildOfClass("Humanoid")
                     if hum then
-                        if hum.Health < Settings._shotCheckHealth - 1 then
+                        if hum.Health < Settings._shotCheckHealth then
                             Settings._adaptiveStability = math.max(Settings._adaptiveMin, Settings._adaptiveStability - 1)
                         else
                             Settings._adaptiveStability = math.min(Settings._adaptiveMax, Settings._adaptiveStability + 1)
@@ -1108,43 +1062,32 @@ RunService.RenderStepped:Connect(function()
                     Settings._shotCheckTarget = nil
                 end
             end
-        end)
 
-        if Settings.AutoFire then
-            if Settings._prefireActive and not Settings.IsFiring then
-                local t = Settings._prefireTarget
-                if t and t.Parent then
-                    safe(function()
-                        if not UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
-                            local lookTarget = GetAimLookTarget(t.Position)
-                            Camera.CFrame = CFrame.new(Camera.CFrame.Position, lookTarget)
-                        end
-                    end)
-
+            if target and Settings.AutoFire and not Settings.IsFiring then
+                local t = target
+                if Settings._prefireActive and Settings._prefireTarget == t then
                     Settings._prefireFrames = Settings._prefireFrames + 1
-
-                    local stabilityNeeded = Settings.AdaptiveFireEnabled
-                        and Settings._adaptiveStability
-                        or Settings.ManualStabilityFrames
-
+                    local lookTarget = GetAimLookTarget(t.Position)
+                    Camera.CFrame = CFrame.new(Camera.CFrame.Position, lookTarget)
+                    
+                    local stabilityNeeded = Settings.AdaptiveFireEnabled and Settings._adaptiveStability or Settings.ManualStabilityFrames
                     local timeout = (tick() - Settings._prefireStartTime) >= 0.4
-
+                    
                     if Settings._prefireFrames >= stabilityNeeded or timeout then
                         safe(function()
                             local hum = t.Parent:FindFirstChildOfClass("Humanoid")
                             if hum and hum.Health > 0 then
                                 Settings._shotCheckTarget = t
-                                Settings._shotCheckTime   = tick()
+                                Settings._shotCheckTime = tick()
                                 Settings._shotCheckHealth = hum.Health
                             end
                         end)
-
                         local originalCF = Settings._prefireOriginalCF
-                        Settings._prefireActive     = false
-                        Settings._prefireTarget     = nil
-                        Settings._prefireFrames     = 0
+                        Settings._prefireActive = false
+                        Settings._prefireTarget = nil
+                        Settings._prefireFrames = 0
                         Settings._prefireOriginalCF = nil
-
+                        
                         if IsVisible(t, t.Parent) then
                             task.spawn(DoAutoFirePreSnapped, originalCF)
                         else
@@ -1154,42 +1097,40 @@ RunService.RenderStepped:Connect(function()
                             end
                         end
                     end
-                else
+                elseif target and not Settings.IsFiring and not Settings._prefireActive then
+                    if (tick() - Settings.LastShotTime) >= Settings.FIRE_RATE then
+                        if IsVisible(target, target.Parent) then
+                            Settings._prefireOriginalCF = Camera.CFrame
+                            local lookTarget = GetAimLookTarget(target.Position)
+                            Camera.CFrame = CFrame.new(Camera.CFrame.Position, lookTarget)
+                            Settings._prefireActive = true
+                            Settings._prefireTarget = target
+                            Settings._prefireFrames = 0
+                            Settings._prefireStartTime = tick()
+                        end
+                    end
+                end
+            else
+                if Settings._prefireActive then
                     if Settings._prefireOriginalCF then
                         Settings.SilentReturnCFrame = Settings._prefireOriginalCF
                         Settings.SilentReturnFrames = 5
                     end
-                    Settings._prefireActive     = false
-                    Settings._prefireTarget     = nil
-                    Settings._prefireFrames     = 0
+                    Settings._prefireActive = false
+                    Settings._prefireTarget = nil
+                    Settings._prefireFrames = 0
                     Settings._prefireOriginalCF = nil
                 end
-
-            elseif target and not Settings.IsFiring and not Settings._prefireActive then
-                if (tick() - Settings.LastShotTime) >= Settings.FIRE_RATE then
-                    if IsVisible(target, target.Parent) then
-                        Settings._prefireOriginalCF = Camera.CFrame
-                        local lookTarget = GetAimLookTarget(target.Position)
-                        Camera.CFrame = CFrame.new(Camera.CFrame.Position, lookTarget)
-                        Settings._prefireActive    = true
-                        Settings._prefireTarget    = target
-                        Settings._prefireFrames    = 0
-                        Settings._prefireStartTime = tick()
-                    end
-                end
             end
-        end
+        end)
     end
-
-    safe(function()
-        stroke.Color = target and Color3.new(0,1,0) or Color3.new(0,1,1)
-    end)
 end)
 
--- ══════════════════════════════════════════════════════════════════
---                            DRAG
--- ══════════════════════════════════════════════════════════════════
-local dragStart, startPos, isDragging = nil, nil, false
+-- Драггинг менюшки (UI-логика из конца твоего файла)
+local MainFrame = ScreenGui:WaitForChild("HVH_OBKAK_Menu", 2) or MainFrame
+local GlowFrame = ScreenGui:FindFirstChild("Frame") or GlowFrame
+local isDragging = false
+local dragStart, startPos
 
 MainFrame.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 and not Settings.IsDraggingSlider then
@@ -1224,11 +1165,3 @@ UserInputService.InputBegan:Connect(function(input, gpe)
         GlowFrame.Visible = v
     end
 end)
-
--- ══════════════════════════════════════════════════════════════════
---                        INITIAL STATE
--- ══════════════════════════════════════════════════════════════════
-aimPage.Visible          = true
-aimBtn.TextColor3        = C.Text
-aimBtn.BackgroundColor3  = Color3.fromRGB(22, 22, 36)
-aimUL.BackgroundTransparency = 0

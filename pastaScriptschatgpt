@@ -728,6 +728,8 @@ CreateToggle(aimPage, "Aimbot Enabled", Settings.AimbotEnabled, function(v) Sett
 CreateToggle(aimPage, "Wall Check", Settings.AimbotWallCheck, function(v) Settings.AimbotWallCheck = v end)
 CreateToggle(aimPage, "Team Check", Settings.AimbotTeamCheck, function(v) Settings.AimbotTeamCheck = v end)
 CreateSlider(aimPage, "FOV Radius", 30, 600, Settings.FOV_RADIUS, function(v) Settings.FOV_RADIUS = v end)
+CreateToggle(aimPage, "Auto Fire", Settings.AutoFire, function(v) Settings.AutoFire = v end)
+
 
 CreateSectionLabel(aimPage, "TARGETING")
 CreateToggle(aimPage, "Fix Aim (Peek Fix)", Settings.FixAim, function(v) Settings.FixAim = v end)

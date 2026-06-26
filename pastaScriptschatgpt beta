@@ -34,7 +34,6 @@ local Settings = {
     MaxDistance      = 1500,
     ChamsTransparency= 0.5,
 
-    -- Логика разделения Бэктрека
     BacktrackMaster  = false, 
     BacktrackESP     = false, 
     BacktrackMS       = 600,  
@@ -75,15 +74,18 @@ local Settings = {
 
 local PriorityParts = {
     "Head","UpperTorso","LowerTorso",
-    "LeftUpperArm","RightUpperArm","LeftUpperLeg","RightUpperLeg"
+    "LeftUpperArm","RightUpperArm","LeftUpperLeg","RightUpperLeg", "HumanoidRootPart"
 }
 local ESP_CACHE = {}
-
 local playerHistory = {}
 local activeGhosts = {}
-local ghostFolder = workspace:FindFirstChild("LocalBacktracks") or Instance.new("Folder")
-ghostFolder.Name = "LocalBacktracks"
-ghostFolder.Parent = workspace
+
+local ghostFolder = workspace:FindFirstChild("LocalBacktracks")
+if not ghostFolder then
+    ghostFolder = Instance.new("Folder")
+    ghostFolder.Name = "LocalBacktracks"
+    ghostFolder.Parent = workspace
+end
 
 local function safe(fn, ...)
     local ok, err = pcall(fn, ...)
@@ -105,10 +107,9 @@ end
 local function IsVisible(part, targetCharacter)
     if not Settings.AimbotWallCheck then return true end
     local character = LocalPlayer.Character
-    if not character then return false end
-    local head = character:FindFirstChild("Head")
+    if not character or not part or not part.Parent then return false end
+    local head = character:FindFirstChild("Head") or character:FindFirstChild("HumanoidRootPart")
     if not head then return false end
-    if not part or not part.Parent then return false end
 
     local camOrigin  = Camera.CFrame.Position
     local charOrigin = head.Position
@@ -116,58 +117,55 @@ local function IsVisible(part, targetCharacter)
 
     local params = RaycastParams.new()
     params.FilterType = Enum.RaycastFilterType.Exclude
-    params.FilterDescendantsInstances = {character, targetCharacter, Camera, ghostFolder}
+    
+    local filterInstances = {character, targetCharacter, Camera}
+    if ghostFolder then table.insert(filterInstances, ghostFolder) end
+    params.FilterDescendantsInstances = filterInstances
     params.IgnoreWater = true
 
-    local okCam,  resCam  = pcall(workspace.Raycast, workspace, camOrigin,  targetPos - camOrigin,  params)
-    local okChar, resChar = pcall(workspace.Raycast, workspace, charOrigin, targetPos - charOrigin, params)
-
-    if not okCam  then resCam  = true end
-    if not okChar then resChar = true end
-
+    local resCam = workspace:Raycast(camOrigin, targetPos - camOrigin, params)
     if Settings.FixAim then
+        local resChar = workspace:Raycast(charOrigin, targetPos - charOrigin, params)
         return (resCam == nil) and (resChar == nil)
-    else
-        return resCam == nil
     end
+    return resCam == nil
 end
 
 local function getBestPart(character)
     if not character then return nil end
-    
     local targetPlayer = Players:GetPlayerFromCharacter(character)
+    
     if Settings.BacktrackMaster and targetPlayer and activeGhosts[targetPlayer.Name] then
         local ghostData = activeGhosts[targetPlayer.Name]
         if ghostData and ghostData.model then
             local partName = Settings.TARGET_PART
-            if partName ~= "All" then
-                if partName == "Random" then
-                    partName = PriorityParts[math.random(1, 3)]
-                end
+            if partName ~= "All" and partName ~= "Random" then
                 local p = ghostData.model:FindFirstChild(partName)
                 if p and IsVisible(p, ghostData.model) then return p end
-                return nil
-            end
-            for _, name in ipairs(PriorityParts) do
-                local p = ghostData.model:FindFirstChild(name)
+            elseif partName == "Random" then
+                local p = ghostData.model:FindFirstChild(PriorityParts[math.random(1, #PriorityParts)])
                 if p and IsVisible(p, ghostData.model) then return p end
+            else
+                for _, name in ipairs(PriorityParts) do
+                    local p = ghostData.model:FindFirstChild(name)
+                    if p and IsVisible(p, ghostData.model) then return p end
+                end
             end
-            return nil
         end
     end
 
     local partName = Settings.TARGET_PART
-    if partName ~= "All" then
-        if partName == "Random" then
-            partName = PriorityParts[math.random(1, 3)]
-        end
+    if partName ~= "All" and partName ~= "Random" then
         local p = character:FindFirstChild(partName)
-        if p and p.Parent and IsVisible(p, character) then return p end
-        return nil
-    end
-    for _, name in ipairs(PriorityParts) do
-        local p = character:FindFirstChild(name)
-        if p and p.Parent and IsVisible(p, character) then return p end
+        if p and IsVisible(p, character) then return p end
+    elseif partName == "Random" then
+        local p = character:FindFirstChild(PriorityParts[math.random(1, #PriorityParts)])
+        if p and IsVisible(p, character) then return p end
+    else
+        for _, name in ipairs(PriorityParts) do
+            local p = character:FindFirstChild(name)
+            if p and IsVisible(p, character) then return p end
+        end
     end
     return nil
 end
@@ -194,31 +192,28 @@ end
 
 Players.PlayerRemoving:Connect(function(p)
     RemoveESP(p.Name)
+    if activeGhosts[p.Name] then
+        if activeGhosts[p.Name].model then activeGhosts[p.Name].model:Destroy() end
+        activeGhosts[p.Name] = nil
+    end
 end)
 
 local function ApplyModelVisuals(model, id, nameTag, color, currentHealth, maxHealth, isGhost)
     if isGhost then
-        if Settings.ShowChams and Settings.BacktrackMaster and Settings.BacktrackESP then
-            local h = model:FindFirstChild("OBKAK_GhostHighlight")
-            if not h then
-                h = Instance.new("Highlight")
-                h.Name = "OBKAK_GhostHighlight"
-                h.Parent = model
+        for _, child in ipairs(model:GetChildren()) do
+            if child:IsA("Part") then
+                local wp = child:FindFirstChild("WallPierce")
+                if wp then
+                    wp.Visible = Settings.BacktrackMaster and Settings.BacktrackESP
+                    wp.Color3 = Settings.BacktrackColor
+                    wp.Transparency = Settings.ChamsTransparency
+                end
             end
-            h.Enabled = true
-            h.FillColor = Settings.BacktrackColor
-            h.OutlineColor = Color3.new(1, 1, 1)
-            h.FillTransparency = Settings.ChamsTransparency
-            h.OutlineTransparency = 0.2
-            h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-        else
-            local hl = model:FindFirstChild("OBKAK_GhostHighlight")
-            if hl then hl.Enabled = false end
         end
         return
     end
 
-    local head = model:FindFirstChild("Head")
+    local head = model:FindFirstChild("Head") or model:FindFirstChild("HumanoidRootPart")
     local data = GetESPData(id)
     if not data or not head then return end
     local pos, onScreen = Camera:WorldToViewportPoint(head.Position)
@@ -272,19 +267,16 @@ end
 
 local function UpdateESP()
     if not Settings.ESPEnabled then
-        for id, _ in pairs(ESP_CACHE) do
-            RemoveESP(id)
-        end
+        for id, _ in pairs(ESP_CACHE) do RemoveESP(id) end
         return
     end
 
     for _, p in ipairs(Players:GetPlayers()) do
         if p == LocalPlayer then continue end
         
-        -- Обычные Игроки
         safe(function()
             local char = p.Character
-            local head = char and char:FindFirstChild("Head")
+            local head = char and (char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart"))
             local hum  = char and char:FindFirstChildOfClass("Humanoid")
             
             if head and hum and hum.Health > 0 then
@@ -302,21 +294,19 @@ local function UpdateESP()
             end
         end)
 
-        -- Бэктрек Призраки
         safe(function()
             local ghostData = activeGhosts[p.Name]
-            if Settings.BacktrackMaster and Settings.BacktrackESP and ghostData and ghostData.model and ghostData.model:FindFirstChild("Head") then
+            if ghostData and ghostData.model then
                 local isTeam = (p.Team == LocalPlayer.Team)
-                if Settings.ESPTeamCheck and isTeam then
-                    local hl = ghostData.model:FindFirstChild("OBKAK_GhostHighlight")
-                    if hl then hl.Enabled = false end
-                else
+                if Settings.BacktrackMaster and Settings.BacktrackESP and not (Settings.ESPTeamCheck and isTeam) then
                     ApplyModelVisuals(ghostData.model, p.Name .. "_Ghost", "", Settings.BacktrackColor, nil, nil, true)
-                end
-            else
-                if ghostData and ghostData.model then
-                    local hl = ghostData.model:FindFirstChild("OBKAK_GhostHighlight")
-                    if hl then hl.Enabled = false end
+                else
+                    for _, child in ipairs(ghostData.model:GetChildren()) do
+                        if child:IsA("Part") then
+                            local wp = child:FindFirstChild("WallPierce")
+                            if wp then wp.Visible = false end
+                        end
+                    end
                 end
             end
         end)
@@ -371,7 +361,6 @@ Instance.new("UICorner", circle).CornerRadius = UDim.new(1, 0)
 local ScreenGui = Instance.new("ScreenGui", CoreGui)
 ScreenGui.Name      = "HVH_OBKAK_Menu"
 ScreenGui.ResetOnSpawn    = false
-ScreenGui.ZIndexBehavior  = Enum.ZIndexBehavior.Sibling
 
 local GlowFrame = Instance.new("Frame", ScreenGui)
 GlowFrame.Size             = UDim2.new(0, 668, 0, 484)
@@ -392,28 +381,13 @@ Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 14)
 local outerStroke = Instance.new("UIStroke", MainFrame)
 outerStroke.Color     = C.AccentDim
 outerStroke.Thickness = 1
-outerStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 
 local Inner = Instance.new("Frame", MainFrame)
 Inner.Size             = UDim2.new(1, -2, 1, -2)
 Inner.Position         = UDim2.new(0, 1, 0, 1)
 Inner.BackgroundColor3 = C.BG2
 Inner.BorderSizePixel  = 0
-Inner.ClipsDescendants = true
 Instance.new("UICorner", Inner).CornerRadius = UDim.new(0, 13)
-
-local TopGlow = Instance.new("Frame", Inner)
-TopGlow.Size             = UDim2.new(0.55, 0, 0, 70)
-TopGlow.BackgroundColor3 = C.Accent
-TopGlow.BackgroundTransparency = 0.92
-TopGlow.BorderSizePixel  = 0
-local tgGrad = Instance.new("UIGradient", TopGlow)
-tgGrad.Rotation = 90
-tgGrad.Transparency = NumberSequence.new({
-    NumberSequenceKeypoint.new(0, 0.0),
-    NumberSequenceKeypoint.new(1, 1.0),
-})
-Instance.new("UICorner", TopGlow).CornerRadius = UDim.new(0, 13)
 
 local TBar = Instance.new("Frame", Inner)
 TBar.Size             = UDim2.new(1, 0, 0, 52)
@@ -427,16 +401,6 @@ TBarPatch.Position         = UDim2.new(0, 0, 1, -14)
 TBarPatch.BackgroundColor3 = C.Panel
 TBarPatch.BorderSizePixel  = 0
 
-local AccentStripe = Instance.new("Frame", TBar)
-AccentStripe.Size             = UDim2.new(0, 3, 0, 24)
-AccentStripe.Position         = UDim2.new(0, 14, 0.5, -12)
-AccentStripe.BackgroundColor3 = C.Accent
-AccentStripe.BorderSizePixel  = 0
-Instance.new("UICorner", AccentStripe).CornerRadius = UDim.new(1, 0)
-local asGrad = Instance.new("UIGradient", AccentStripe)
-asGrad.Color    = ColorSequence.new(C.Accent, C.Violet)
-asGrad.Rotation = 90
-
 local TitleLabel = Instance.new("TextLabel", TBar)
 TitleLabel.Text           = "HVH OBKAK"
 TitleLabel.Size           = UDim2.new(0, 155, 1, 0)
@@ -446,32 +410,6 @@ TitleLabel.TextSize       = 18
 TitleLabel.Font           = Enum.Font.GothamBold
 TitleLabel.BackgroundTransparency = 1
 TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
-
-local Badge = Instance.new("Frame", TBar)
-Badge.Size             = UDim2.new(0, 70, 0, 20)
-Badge.Position         = UDim2.new(0, 180, 0.5, -10)
-Badge.BackgroundColor3 = C.AccentDim
-Badge.BorderSizePixel  = 0
-Instance.new("UICorner", Badge).CornerRadius = UDim.new(0, 5)
-local BadgeGrad = Instance.new("UIGradient", Badge)
-BadgeGrad.Color = ColorSequence.new(C.AccentDim, C.VioletDim)
-local BadgeLbl = Instance.new("TextLabel", Badge)
-BadgeLbl.Text          = "ultimate"
-BadgeLbl.Size           = UDim2.new(1, 0, 1, 0)
-BadgeLbl.TextColor3     = C.Accent
-BadgeLbl.TextSize       = 11
-BadgeLbl.Font           = Enum.Font.GothamBold
-BadgeLbl.BackgroundTransparency = 1
-
-local VerLabel = Instance.new("TextLabel", TBar)
-VerLabel.Text           = "v 2.6"
-VerLabel.Size           = UDim2.new(0, 46, 1, 0)
-VerLabel.Position       = UDim2.new(1, -94, 0, 0)
-VerLabel.TextColor3     = C.TextMuted
-VerLabel.TextSize       = 12
-VerLabel.Font           = Enum.Font.Gotham
-VerLabel.BackgroundTransparency = 1
-VerLabel.TextXAlignment = Enum.TextXAlignment.Right
 
 local MinBtn = Instance.new("TextButton", TBar)
 MinBtn.Size             = UDim2.new(0, 32, 0, 32)
@@ -483,16 +421,6 @@ MinBtn.TextSize         = 20
 MinBtn.Font             = Enum.Font.GothamBold
 MinBtn.BorderSizePixel  = 0
 Instance.new("UICorner", MinBtn).CornerRadius = UDim.new(0, 9)
-local minStroke = Instance.new("UIStroke", MinBtn)
-minStroke.Color     = C.Border
-minStroke.Thickness = 1
-
-MinBtn.MouseEnter:Connect(function()
-    Tw(MinBtn, {BackgroundColor3 = Color3.fromRGB(40, 40, 65), TextColor3 = C.Text})
-end)
-MinBtn.MouseLeave:Connect(function()
-    Tw(MinBtn, {BackgroundColor3 = Color3.fromRGB(28, 28, 46), TextColor3 = C.TextDim})
-end)
 
 local isMinimized = false
 MinBtn.MouseButton1Click:Connect(function()
@@ -508,19 +436,6 @@ MinBtn.MouseButton1Click:Connect(function()
     end
 end)
 
-local GradSep = Instance.new("Frame", Inner)
-GradSep.Size             = UDim2.new(1, -20, 0, 1)
-GradSep.Position         = UDim2.new(0, 10, 0, 52)
-GradSep.BackgroundColor3 = Color3.new(1, 1, 1)
-GradSep.BorderSizePixel  = 0
-local gSepGrad = Instance.new("UIGradient", GradSep)
-gSepGrad.Color = ColorSequence.new({
-    ColorSequenceKeypoint.new(0,    Color3.fromRGB(9,9,15)),
-    ColorSequenceKeypoint.new(0.22, C.Accent),
-    ColorSequenceKeypoint.new(0.78, C.Violet),
-    ColorSequenceKeypoint.new(1,    Color3.fromRGB(9,9,15)),
-})
-
 local TabBar = Instance.new("Frame", Inner)
 TabBar.Size             = UDim2.new(1, 0, 0, 44)
 TabBar.Position         = UDim2.new(0, 0, 0, 53)
@@ -528,13 +443,6 @@ TabBar.BackgroundColor3 = C.Panel
 TabBar.BorderSizePixel  = 0
 local tabLL = Instance.new("UIListLayout", TabBar)
 tabLL.FillDirection = Enum.FillDirection.Horizontal
-tabLL.SortOrder     = Enum.SortOrder.LayoutOrder
-
-local TabBorderLine = Instance.new("Frame", Inner)
-TabBorderLine.Size             = UDim2.new(1, 0, 0, 1)
-TabBorderLine.Position         = UDim2.new(0, 0, 0, 97)
-TabBorderLine.BackgroundColor3 = C.Border
-TabBorderLine.BorderSizePixel  = 0
 
 local Pages = Instance.new("Frame", Inner)
 Pages.Size             = UDim2.new(1, -14, 1, -108)
@@ -559,8 +467,6 @@ local function CreateTab(name)
     ul.Position         = UDim2.new(0, 0, 1, -2)
     ul.BackgroundColor3 = C.Accent
     ul.BackgroundTransparency = 1
-    local ulGrad = Instance.new("UIGradient", ul)
-    ulGrad.Color = ColorSequence.new(C.Accent, C.Violet)
 
     local page = Instance.new("ScrollingFrame", Pages)
     page.Size           = UDim2.new(1, 0, 1, 0)
@@ -568,20 +474,13 @@ local function CreateTab(name)
     page.Visible        = false
     page.ScrollBarThickness = 3
     page.ScrollBarImageColor3 = C.Accent
-    page.ScrollBarImageTransparency = 0.4
     page.AutomaticCanvasSize = Enum.AutomaticSize.Y
     page.CanvasSize     = UDim2.new(0, 0, 0, 0)
     page.BorderSizePixel  = 0
     
     local layout = Instance.new("UIListLayout", page)
     layout.Padding = UDim.new(0, 5)
-    layout.SortOrder     = Enum.SortOrder.LayoutOrder
-    local padding = Instance.new("UIPadding", page)
-    padding.PaddingTop = UDim.new(0, 4)
-    padding.PaddingBottom = UDim.new(0, 8)
-    padding.PaddingLeft = UDim.new(0, 2)
-    padding.PaddingRight = UDim.new(0, 2)
-
+    
     table.insert(tabUnderlines, ul)
 
     btn.MouseButton1Click:Connect(function()
@@ -605,37 +504,19 @@ local function CreateSectionLabel(parent, text)
     f.Size             = UDim2.new(1, 0, 0, 28)
     f.BackgroundTransparency = 1
 
-    local dot = Instance.new("Frame", f)
-    dot.Size             = UDim2.new(0, 5, 0, 5)
-    dot.Position         = UDim2.new(0, 6, 0.5, -2)
-    dot.BackgroundColor3 = C.Accent
-    dot.BorderSizePixel  = 0
-    Instance.new("UICorner", dot).CornerRadius = UDim.new(1, 0)
-    local dGrad = Instance.new("UIGradient", dot)
-    dGrad.Color = ColorSequence.new(C.Accent, C.Violet)
-
     local lbl = Instance.new("TextLabel", f)
     lbl.Text           = text
-    lbl.Size           = UDim2.new(1, -18, 1, 0)
+    lbl.Size           = UDim2.new(1, -16, 1, 0)
     lbl.Position       = UDim2.new(0, 16, 0, 0)
     lbl.TextColor3     = C.Accent
     lbl.TextSize       = 11
     lbl.Font           = Enum.Font.GothamBold
     lbl.BackgroundTransparency = 1
     lbl.TextXAlignment = Enum.TextXAlignment.Left
-
-    local line = Instance.new("Frame", f)
-    line.Size             = UDim2.new(1, -6, 0, 1)
-    line.Position         = UDim2.new(0, 3, 1, -1)
-    line.BackgroundColor3 = C.Border
-    line.BorderSizePixel  = 0
-
-    return f
 end
 
 local function CreateToggle(parent, text, default, callback)
     local state = default
-
     local container = Instance.new("Frame", parent)
     container.Size             = UDim2.new(1, 0, 0, 40)
     container.BackgroundColor3 = C.Card
@@ -644,18 +525,6 @@ local function CreateToggle(parent, text, default, callback)
 
     local bStroke = Instance.new("UIStroke", container)
     bStroke.Color     = state and C.BorderAct or C.Border
-    bStroke.Thickness = 1
-
-    local lBar = Instance.new("Frame", container)
-    lBar.Size             = UDim2.new(0, 3, 0, 22)
-    lBar.Position         = UDim2.new(0, 0, 0.5, -11)
-    lBar.BackgroundColor3 = C.Accent
-    lBar.BackgroundTransparency = state and 0 or 1
-    lBar.BorderSizePixel  = 0
-    Instance.new("UICorner", lBar).CornerRadius = UDim.new(1, 0)
-    local lbGrad = Instance.new("UIGradient", lBar)
-    lbGrad.Color    = ColorSequence.new(C.Accent, C.Violet)
-    lbGrad.Rotation = 90
 
     local lbl = Instance.new("TextLabel", container)
     lbl.Text           = text
@@ -671,7 +540,6 @@ local function CreateToggle(parent, text, default, callback)
     pill.Size             = UDim2.new(0, 36, 0, 20)
     pill.Position         = UDim2.new(1, -47, 0.5, -10)
     pill.BackgroundColor3 = state and C.Accent or C.SliderOff
-    pill.BorderSizePixel  = 0
     Instance.new("UICorner", pill).CornerRadius = UDim.new(1, 0)
 
     local thumb = Instance.new("Frame", pill)
@@ -679,7 +547,6 @@ local function CreateToggle(parent, text, default, callback)
     thumb.AnchorPoint      = Vector2.new(0, 0.5)
     thumb.Position         = state and UDim2.new(1, -17, 0.5, 0) or UDim2.new(0, 3, 0.5, 0)
     thumb.BackgroundColor3 = C.White
-    thumb.BorderSizePixel  = 0
     Instance.new("UICorner", thumb).CornerRadius = UDim.new(1, 0)
 
     local btn = Instance.new("TextButton", container)
@@ -693,7 +560,6 @@ local function CreateToggle(parent, text, default, callback)
         Tw(pill,  {BackgroundColor3 = state and C.Accent or C.SliderOff})
         Tw(thumb, {Position = state and UDim2.new(1, -17, 0.5, 0) or UDim2.new(0, 3, 0.5, 0)})
         Tw(lbl,   {TextColor3 = state and C.Text or C.TextDim})
-        lBar.BackgroundTransparency = state and 0 or 1
         safe(callback, state)
     end)
 
@@ -732,7 +598,6 @@ local function CreateSlider(parent, text, minVal, maxVal, default, callback)
     track.Size             = UDim2.new(1, -28, 0, 4)
     track.Position         = UDim2.new(0, 14, 0, 36)
     track.BackgroundColor3 = C.SliderOff
-    track.BorderSizePixel  = 0
     Instance.new("UICorner", track).CornerRadius = UDim.new(1, 0)
 
     local ratio = math.clamp((default - minVal) / (maxVal - minVal), 0, 1)
@@ -740,21 +605,14 @@ local function CreateSlider(parent, text, minVal, maxVal, default, callback)
     local fill = Instance.new("Frame", track)
     fill.Size             = UDim2.new(ratio, 0, 1, 0)
     fill.BackgroundColor3 = C.Accent
-    fill.BorderSizePixel  = 0
     Instance.new("UICorner", fill).CornerRadius = UDim.new(1, 0)
-    local fGrad = Instance.new("UIGradient", fill)
-    fGrad.Color = ColorSequence.new(C.Accent, C.Violet)
 
     local dot = Instance.new("Frame", track)
     dot.Size             = UDim2.new(0, 12, 0, 12)
     dot.AnchorPoint      = Vector2.new(0.5, 0.5)
     dot.Position         = UDim2.new(ratio, 0, 0.5, 0)
     dot.BackgroundColor3 = C.White
-    dot.BorderSizePixel  = 0
     Instance.new("UICorner", dot).CornerRadius = UDim.new(1, 0)
-    local dotStroke = Instance.new("UIStroke", dot)
-    dotStroke.Color     = C.Accent
-    dotStroke.Thickness = 1.5
 
     local hitbox = Instance.new("TextButton", container)
     hitbox.Size             = UDim2.new(1, -28, 0, 22)
@@ -765,12 +623,7 @@ local function CreateSlider(parent, text, minVal, maxVal, default, callback)
     local dragging = false
     local function applyVal(sx)
         local rel = math.clamp((sx - track.AbsolutePosition.X) / track.AbsoluteSize.X, 0, 1)
-        local val
-        if (maxVal - minVal) > 10 then
-            val = math.floor(minVal + (maxVal - minVal) * rel)
-        else
-            val = math.floor((minVal + (maxVal - minVal) * rel) * 10) / 10
-        end
+        local val = math.floor(minVal + (maxVal - minVal) * rel)
         fill.Size     = UDim2.new(rel, 0, 1, 0)
         dot.Position  = UDim2.new(rel, 0, 0.5, 0)
         valLbl.Text   = tostring(val)
@@ -804,9 +657,6 @@ local espPage = CreateTab("Visuals")
 local ragePage = CreateTab("Rage")
 local miscPage = CreateTab("Misc")
 
--- ══════════════════════════════════════════════════════════════════
---                         AIMBOT PAGE
--- ══════════════════════════════════════════════════════════════════
 CreateSectionLabel(aimPage, "GENERAL")
 CreateToggle(aimPage, "Aimbot Enabled", Settings.AimbotEnabled, function(v) Settings.AimbotEnabled = v circle.Visible = v end)
 CreateToggle(aimPage, "Wall Check", Settings.AimbotWallCheck, function(v) Settings.AimbotWallCheck = v end)
@@ -821,7 +671,6 @@ CreateToggle(aimPage, "Fix MultiPoint", Settings.MultiPoint, function(v) Setting
 local HBOuter = Instance.new("Frame", aimPage)
 HBOuter.Size = UDim2.new(1, 0, 0, 40)
 HBOuter.BackgroundColor3 = C.Card
-HBOuter.BorderSizePixel = 0
 Instance.new("UICorner", HBOuter).CornerRadius = UDim.new(0, 10)
 Instance.new("UIStroke", HBOuter).Color = C.Border
 
@@ -844,8 +693,6 @@ HitboxBtn.TextColor3 = C.Text
 HitboxBtn.Font = Enum.Font.GothamBold
 HitboxBtn.TextSize = 12
 Instance.new("UICorner", HitboxBtn).CornerRadius = UDim.new(0, 6)
-local hbStroke = Instance.new("UIStroke", HitboxBtn)
-hbStroke.Color = C.Border
 
 HitboxBtn.MouseButton1Click:Connect(function()
     Settings.CurrentPartIndex = Settings.CurrentPartIndex + 1
@@ -855,87 +702,17 @@ HitboxBtn.MouseButton1Click:Connect(function()
 end)
 
 CreateSectionLabel(aimPage, "AUTOMATION")
-
-local function DoAutoFirePreSnapped(originalCF)
-    if Settings.IsFiring then return end
-    Settings.IsFiring = true
-    Settings.LastShotTime = tick()
-
-    pcall(function()
-        if Settings.BacktrackMaster and Settings.CurrentTarget then
-            local targetPlayer = Settings.CurrentTarget
-            local ghostData = activeGhosts[targetPlayer.Name]
-            
-            if ghostData and ghostData.model and targetPlayer.Character then
-                local targetChar = targetPlayer.Character
-                local targetHRP  = targetChar:FindFirstChild("HumanoidRootPart")
-                local targetHead = targetChar:FindFirstChild("Head")
-                local ghostHead  = ghostData.model:FindFirstChild("Head")
-                
-                if targetHRP and targetHead and ghostHead then
-                    local mousePos = UserInputService:GetMouseLocation()
-                    local ray = Camera:ViewportPointToRay(mousePos.X, mousePos.Y)
-                    
-                    local ghostParams = RaycastParams.new()
-                    ghostParams.FilterDescendantsInstances = {ghostData.model}
-                    ghostParams.FilterType = Enum.RaycastFilterType.Include
-                    local ghostRaycast = workspace:Raycast(ray.Origin, ray.Direction * 1000, ghostParams)
-                    
-                    if ghostRaycast then
-                        local hitPoint = ghostRaycast.Position
-                        local ghostHRPFrame = ghostData.model:GetPivot()
-                        local newHRPPosition = hitPoint - (ghostHead.Position - ghostHRPFrame.Position)
-                        targetHRP.CFrame = CFrame.new(newHRPPosition) * (ghostHRPFrame - ghostHRPFrame.Position)
-                    end
-                end
-            end
-        end
-
-        if mouse1click then
-            mouse1click()
-        elseif mouse1press and mouse1release then
-            mouse1press()
-            task.wait(0.01)
-            mouse1release()
-        else
-            local char = LocalPlayer.Character
-            if char then
-                local tool = char:FindFirstChildOfClass("Tool")
-                if tool then safe(function() tool:Activate() end) end
-            end
-        end
-
-        if originalCF then
-            Settings.SilentReturnCFrame = originalCF
-            Settings.SilentReturnFrames = 5
-        end
-    end)
-    Settings.IsFiring = false
-end
-
-CreateToggle(aimPage, "Adaptive Fire (Auto-tune)", Settings.AdaptiveFireEnabled, function(v) Settings.AdaptiveFireEnabled = v end)
+CreateToggle(aimPage, "Adaptive Fire", Settings.AdaptiveFireEnabled, function(v) Settings.AdaptiveFireEnabled = v end)
 
 local stabCard = Instance.new("Frame", aimPage)
 stabCard.Size = UDim2.new(1, 0, 0, 36)
 stabCard.BackgroundColor3 = Color3.fromRGB(13, 13, 22)
-stabCard.BorderSizePixel = 0
 Instance.new("UICorner", stabCard).CornerRadius = UDim.new(0, 10)
-local stabStroke = Instance.new("UIStroke", stabCard)
-stabStroke.Color = C.GreenOn
-stabStroke.Thickness = 1
-stabStroke.Transparency = 0.4
-local stabDot = Instance.new("Frame", stabCard)
-stabDot.Size = UDim2.new(0, 6, 0, 6)
-stabDot.Position = UDim2.new(0, 13, 0.5, -3)
-stabDot.BackgroundColor3 = C.GreenOn
-stabDot.BorderSizePixel = 0
-Instance.new("UICorner", stabDot).CornerRadius = UDim.new(1, 0)
-
 local stabilityLabel = Instance.new("TextLabel", stabCard)
 stabilityLabel.Size = UDim2.new(1, -34, 1, 0)
 stabilityLabel.Position = UDim2.new(0, 26, 0, 0)
 stabilityLabel.BackgroundTransparency = 1
-stabilityLabel.Text = "Stability: 3 frames [auto]"
+stabilityLabel.Text = "Stability: --"
 stabilityLabel.TextColor3 = C.GreenOn
 stabilityLabel.TextSize = 13
 stabilityLabel.Font = Enum.Font.Gotham
@@ -944,62 +721,41 @@ stabilityLabel.TextXAlignment = Enum.TextXAlignment.Left
 CreateSlider(aimPage, "Manual Stability Frames", 0, 10, Settings.ManualStabilityFrames, function(v) Settings.ManualStabilityFrames = v end)
 CreateSlider(aimPage, "Fire Rate (sec)", 0.1, 5, Settings.FIRE_RATE, function(v) Settings.FIRE_RATE = v end)
 
--- ══════════════════════════════════════════════════════════════════
---                         VISUALS PAGE 
--- ══════════════════════════════════════════════════════════════════
 CreateSectionLabel(espPage, "RENDERING")
 CreateToggle(espPage, "ESP Master", Settings.ESPEnabled, function(v) Settings.ESPEnabled = v end)
 CreateToggle(espPage, "Show Names", Settings.ShowNames, function(v) Settings.ShowNames = v end)
 CreateToggle(espPage, "Show Health", Settings.ShowHealth, function(v) Settings.ShowHealth = v end)
 CreateToggle(espPage, "Show Chams", Settings.ShowChams, function(v) Settings.ShowChams = v end)
-
 CreateSectionLabel(espPage, "FILTERS")
 CreateToggle(espPage, "Team Check", Settings.ESPTeamCheck, function(v) Settings.ESPTeamCheck = v end)
 CreateSlider(espPage, "Max Distance", 100, 5000, Settings.MaxDistance, function(v) Settings.MaxDistance = v end)
-
 CreateSectionLabel(espPage, "BACKTRACK VISUALS")
 CreateToggle(espPage, "Backtrack ESP (Chams)", Settings.BacktrackESP, function(v) Settings.BacktrackESP = v end)
 
--- ══════════════════════════════════════════════════════════════════
---                         RAGE PAGE
--- ══════════════════════════════════════════════════════════════════
 CreateSectionLabel(ragePage, "ANTI-AIM")
 CreateToggle(ragePage, "Jitter Anti-Aim", Settings.JitterEnabled, function(v) Settings.JitterEnabled = v end)
 CreateSlider(ragePage, "Jitter Degree", 10, 180, Settings.JitterDegree, function(v) Settings.JitterDegree = v end)
 CreateSlider(ragePage, "Jitter Speed", 5, 100, Settings.JitterSpeed, function(v) Settings.JitterSpeed = v end)
-
 CreateToggle(ragePage, "Pitch Mouse Anti-Aim", Settings.HeadDownEnabled, function(v) Settings.HeadDownEnabled = v end)
 CreateSlider(ragePage, "Pitch Angle (Degree)", 0, 90, Settings.HeadDownPitch, function(v) Settings.HeadDownPitch = v end)
 
--- ══════════════════════════════════════════════════════════════════
---                         MISC PAGE
--- ══════════════════════════════════════════════════════════════════
 CreateSectionLabel(miscPage, "MECHANICS")
 CreateToggle(miscPage, "Backtrack Master", Settings.BacktrackMaster, function(v) 
     Settings.BacktrackMaster = v 
     if not v then
-        ghostFolder:ClearAllChildren()
+        if ghostFolder then ghostFolder:ClearAllChildren() end
         table.clear(activeGhosts)
     end
 end)
-CreateSlider(miscPage, "Backtrack MS (Delay)", 1, 1000, Settings.BacktrackMS, function(v) Settings.BacktrackMS = v end)
-
+CreateSlider(miscPage, "Backtrack MS", 1, 1000, Settings.BacktrackMS, function(v) Settings.BacktrackMS = v end)
 CreateSectionLabel(miscPage, "THIRD PERSON")
 CreateToggle(miscPage, "TP Enabled", Settings.TP_Enabled, function(v) Settings.TP_Enabled = v if not v then LocalPlayer.CameraMaxZoomDistance = defaultMaxZoom LocalPlayer.CameraMinZoomDistance = defaultMinZoom end end)
 CreateSlider(miscPage, "TP Distance", 5, 50, Settings.TP_Distance, function(v) Settings.TP_Distance = v end)
 CreateSlider(miscPage, "Transparency", 0.1, 1, Settings.TP_Transparency, function(v) Settings.TP_Transparency = v end)
 
--- ══════════════════════════════════════════════════════════════════
---              PURE R6 GHOST GENERATOR + HUMANOID FIX
--- ══════════════════════════════════════════════════════════════════
 local function createPureR6Model(playerName)
     local model = Instance.new("Model")
     model.Name = playerName .. "_Backtrack"
-    
-    -- Добавляем пустой Humanoid. Без него Highlight.AlwaysOnTop на кастомных моделях багует сквозь стены.
-    local hum = Instance.new("Humanoid")
-    hum.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
-    hum.Parent = model
     
     local r6Parts = {
         {"HumanoidRootPart", Vector3.new(2, 2, 1)},
@@ -1017,20 +773,17 @@ local function createPureR6Model(playerName)
         p.Size = partData[2]
         p.CanCollide = false
         p.Anchored = true
-        p.Transparency = 0.55
-        p.Material = Enum.Material.ForceField
-        p.Color = Settings.BacktrackColor
+        p.Transparency = 1 
+        p.Material = Enum.Material.SmoothPlastic
         p.Parent = model
         
-        -- Дублирующий Adornment рендер на случай, если движок блочит Highlight на ForceField.
-        -- Это 100% пробивает любые стены.
         local box = Instance.new("BoxHandleAdornment")
         box.Name = "WallPierce"
         box.Size = p.Size
         box.AlwaysOnTop = true
         box.ZIndex = 5
         box.Color3 = Settings.BacktrackColor
-        box.Transparency = 0.65
+        box.Transparency = 1
         box.Adornee = p
         box.Parent = p
     end
@@ -1042,17 +795,14 @@ end
 
 local function localAssembleR6(model, baseCFrame)
     model:PivotTo(baseCFrame)
-    model["Torso"].CFrame = baseCFrame
-    model["Head"].CFrame = baseCFrame * CFrame.new(0, 1.5, 0)
-    model["Left Arm"].CFrame = baseCFrame * CFrame.new(-1.5, 0, 0)
-    model["Right Arm"].CFrame = baseCFrame * CFrame.new(1.5, 0, 0)
-    model["Left Leg"].CFrame = baseCFrame * CFrame.new(-0.5, -2, 0)
-    model["Right Leg"].CFrame = baseCFrame * CFrame.new(0.5, -2, 0)
+    if model:FindFirstChild("Torso") then model["Torso"].CFrame = baseCFrame end
+    if model:FindFirstChild("Head") then model["Head"].CFrame = baseCFrame * CFrame.new(0, 1.5, 0) end
+    if model:FindFirstChild("Left Arm") then model["Left Arm"].CFrame = baseCFrame * CFrame.new(-1.5, 0, 0) end
+    if model:FindFirstChild("Right Arm") then model["Right Arm"].CFrame = baseCFrame * CFrame.new(1.5, 0, 0) end
+    if model:FindFirstChild("Left Leg") then model["Left Leg"].CFrame = baseCFrame * CFrame.new(-0.5, -2, 0) end
+    if model:FindFirstChild("Right Leg") then model["Right Leg"].CFrame = baseCFrame * CFrame.new(0.5, -2, 0) end
 end
 
--- ══════════════════════════════════════════════════════════════════
---                         HEARTBEAT BACKTRACK LOOP
--- ══════════════════════════════════════════════════════════════════
 RunService.Heartbeat:Connect(function()
     if not Settings.BacktrackMaster then return end
     local currentTime = os.clock()
@@ -1061,15 +811,15 @@ RunService.Heartbeat:Connect(function()
     for _, player in ipairs(Players:GetPlayers()) do
         if player ~= LocalPlayer then
             local char = player.Character
-            if char and char:FindFirstChild("HumanoidRootPart") and char:FindFirstChild("Humanoid") and char.Humanoid.Health > 0 then
-                
-                if not playerHistory[player.Name] then
-                    playerHistory[player.Name] = {}
-                end
+            local root = char and char:FindFirstChild("HumanoidRootPart")
+            local hum  = char and char:FindFirstChildOfClass("Humanoid")
+            
+            if root and hum and hum.Health > 0 then
+                if not playerHistory[player.Name] then playerHistory[player.Name] = {} end
                 
                 table.insert(playerHistory[player.Name], {
                     time = currentTime,
-                    cframe = char.HumanoidRootPart.CFrame
+                    cframe = root.CFrame
                 })
                 
                 while #playerHistory[player.Name] > 0 and (currentTime - playerHistory[player.Name][1].time) > backtrackLimitSec do
@@ -1091,41 +841,12 @@ RunService.Heartbeat:Connect(function()
                 
                 if closestFrame then
                     if not activeGhosts[player.Name] then
-                        local ghostModel = createPureR6Model(player.Name)
-                        activeGhosts[player.Name] = {
-                            model = ghostModel,
-                            player = player
-                        }
+                        activeGhosts[player.Name] = { model = createPureR6Model(player.Name), player = player }
                     end
                     
                     local ghostData = activeGhosts[player.Name]
                     if ghostData and ghostData.model then
-                        local rawCFrame = closestFrame.cframe
-                        
-                        local floorParams = RaycastParams.new()
-                        floorParams.FilterDescendantsInstances = {char, ghostData.model, ghostFolder, LocalPlayer.Character}
-                        floorParams.FilterType = Enum.RaycastFilterType.Exclude
-                        
-                        local floorResult = workspace:Raycast(rawCFrame.Position + Vector3.new(0, 5, 0), Vector3.new(0, -15, 0), floorParams)
-                        
-                        if floorResult then
-                            local fixedPosition = Vector3.new(rawCFrame.X, floorResult.Position.Y + 3, rawCFrame.Z)
-                            localAssembleR6(ghostData.model, CFrame.new(fixedPosition) * (rawCFrame - rawCFrame.Position))
-                        else
-                            localAssembleR6(ghostData.model, rawCFrame)
-                        end
-                        
-                        -- Обновление динамической видимости Adornments
-                        for _, child in ipairs(ghostData.model:GetChildren()) do
-                            if child:IsA("Part") then
-                                local wp = child:FindFirstChild("WallPierce")
-                                if wp then
-                                    wp.Visible = Settings.BacktrackESP
-                                    wp.Color3 = Settings.BacktrackColor
-                                    wp.Transparency = Settings.ChamsTransparency + 0.15
-                                end
-                            end
-                        end
+                        localAssembleR6(ghostData.model, closestFrame.cframe)
                     end
                 end
             else
@@ -1139,33 +860,14 @@ RunService.Heartbeat:Connect(function()
 end)
 
 -- ══════════════════════════════════════════════════════════════════
---                         SILENT RETURN
--- ══════════════════════════════════════════════════════════════════
-RunService:BindToRenderStep("HVH_SilentReturn", Enum.RenderPriority.Camera.Value + 2, function()
-    if not (Settings.SilentReturnCFrame and Settings.SilentReturnFrames > 0) then return end
-    if Settings.IsFiring then
-        Settings.SilentReturnCFrame = nil
-        Settings.SilentReturnFrames = 0
-        return
-    end
-    Settings.SilentReturnFrames = Settings.SilentReturnFrames - 1
-    if not UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
-        Camera.CFrame = Camera.CFrame:Lerp(Settings.SilentReturnCFrame, 0.6)
-    end
-    if Settings.SilentReturnFrames <= 0 then
-        Settings.SilentReturnCFrame = nil
-    end
-end)
-
--- ══════════════════════════════════════════════════════════════════
---                      ANTI-AIM & THIRD PERSON
+--                        ANTI-AIM & THIRD PERSON
 -- ══════════════════════════════════════════════════════════════════
 local wasJittering = false
 RunService:BindToRenderStep("HVH_AntiAim_TP", Enum.RenderPriority.Camera.Value + 1, function()
     local char = LocalPlayer.Character
     if not char then return end
     local root = char:FindFirstChild("HumanoidRootPart")
-    local hum  = char:FindFirstChildOfClass("Humanoid")
+    local hum = char:FindFirstChildOfClass("Humanoid")
     if not root or not hum or hum.Health <= 0 then return end
 
     if Settings.JitterEnabled or Settings.TP_Enabled then
@@ -1200,8 +902,66 @@ RunService:BindToRenderStep("HVH_AntiAim_TP", Enum.RenderPriority.Camera.Value +
 end)
 
 -- ══════════════════════════════════════════════════════════════════
---                        ОСНОВНОЙ РАБОЧИЙ ЦИКЛ АИМБОТА
+--             ✅ ДОБАВЛЕНО: УМНЫЙ ХУК МЫШКИ (PITCH ANTI-AIM)
 -- ══════════════════════════════════════════════════════════════════
+local Mouse = LocalPlayer:GetMouse()
+local oldIndex
+oldIndex = hookmetamethod(game, "__index", function(self, key)
+    if self == Mouse and (key == "Hit" or key == "hit") then
+        if not checkcaller() and Settings.HeadDownEnabled then
+            -- МГНОВЕННО ОТКЛЮЧАЕМ ПОДМЕНУ, ЕСЛИ:
+            -- 1. Аимбот видит врага в FOV (Settings.CurrentTarget)
+            -- 2. Идет анимация наведения/стабилизации (_prefireActive)
+            -- 3. Выполняется функция симуляции клика (IsFiring / isSnapped)
+            -- 4. Зажата физическая кнопка мыши (MouseButton1)
+            if Settings.IsFiring or Settings.isSnapped or Settings._prefireActive or Settings.CurrentTarget or UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
+                return oldIndex(self, key)
+            end
+            
+            local character = LocalPlayer.Character
+            local root = character and (character:FindFirstChild("HumanoidRootPart") or character:FindFirstChild("Torso"))
+            
+            if root then
+                -- Динамический расчет точки на основе ползунка (Settings.HeadDownPitch)
+                -- 90 градусов = строго под ноги. 0 градусов = прямо перед собой.
+                local angle = math.rad(Settings.HeadDownPitch or 90)
+                local forwardComponent = math.cos(angle)
+                local downComponent = math.sin(angle)
+                
+                local targetPos = root.Position + (root.CFrame.LookVector * forwardComponent * 10) - (Vector3.new(0, 1, 0) * downComponent * 10)
+                return CFrame.new(targetPos)
+            end
+        end
+    end
+    return oldIndex(self, key)
+end)
+
+local function DoAutoFire(originalCF)
+    if Settings.IsFiring then return end
+    Settings.IsFiring = true
+    Settings.LastShotTime = tick()
+
+    pcall(function()
+        if mouse1click then
+            mouse1click()
+        elseif mouse1press and mouse1release then
+            mouse1press()
+            task.wait(0.01)
+            mouse1release()
+        else
+            local char = LocalPlayer.Character
+            local tool = char and char:FindFirstChildOfClass("Tool")
+            if tool then tool:Activate() end
+        end
+
+        if originalCF and Settings.FixAim then
+            Settings.SilentReturnCFrame = originalCF
+            Settings.SilentReturnFrames = 3
+        end
+    end)
+    Settings.IsFiring = false
+end
+
 task.spawn(function()
     while true do
         task.wait()
@@ -1220,13 +980,12 @@ task.spawn(function()
             if Settings.AimbotTeamCheck and p.Team == LocalPlayer.Team then continue end
 
             local char = p.Character
-            if char and char:FindFirstChild("Head") and char:FindFirstChildOfClass("Humanoid") and char.Humanoid.Health > 0 then
+            if char and char:FindFirstChildOfClass("Humanoid") and char.Humanoid.Health > 0 then
                 local part = getBestPart(char)
                 if part then
                     local screenPos, onScreen = Camera:WorldToViewportPoint(part.Position)
                     if onScreen then
-                        local screenPos2D = Vector2.new(screenPos.X, screenPos.Y)
-                        local mag = (screenPos2D - mousePos).Magnitude
+                        local mag = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
                         if mag < bestDist then
                             bestDist   = mag
                             bestTarget = p 
@@ -1244,23 +1003,16 @@ task.spawn(function()
             local finalLookPos = GetAimLookTarget(targetPos)
 
             if Settings.AutoFire then
-                local stability = Settings.ManualStabilityFrames
-                if Settings.AdaptiveFireEnabled then
-                    stability = Settings._adaptiveStability
+                local stability = Settings.AdaptiveFireEnabled and Settings._adaptiveStability or Settings.ManualStabilityFrames
+                if stability > 0 and not Settings.isSnapped then
+                    Settings.isSnapped = true
+                    for i = 1, stability do RunService.RenderStepped:Wait() end
                 end
 
-                local readyToShoot = true
-                if stability > 0 then
-                    if not Settings.isSnapped then
-                        Settings.isSnapped = true
-                        for i = 1, stability do RunService.RenderStepped:Wait() end
-                    end
-                end
-
-                if tick() - Settings.LastShotTime >= Settings.FIRE_RATE and readyToShoot then
+                if tick() - Settings.LastShotTime >= Settings.FIRE_RATE then
                     local oldCF = Camera.CFrame
                     Camera.CFrame = CFrame.lookAt(Camera.CFrame.Position, finalLookPos)
-                    DoAutoFirePreSnapped(oldCF)
+                    DoAutoFire(oldCF)
                 end
             else
                 Settings.isSnapped = false
@@ -1274,9 +1026,6 @@ task.spawn(function()
     end
 end)
 
--- ══════════════════════════════════════════════════════════════════
---                        ОБНОВЛЕНИЕ ТАЙМИНГОВ И ИСПРАВЛЕННЫЙ РЕНДЕР
--- ══════════════════════════════════════════════════════════════════
 RunService.RenderStepped:Connect(function()
     local mousePos = UserInputService:GetMouseLocation()
     circle.Position = UDim2.new(0, mousePos.X, 0, mousePos.Y)
@@ -1306,59 +1055,49 @@ RunService.RenderStepped:Connect(function()
     elseif not Settings.AdaptiveFireEnabled then
         stabilityLabel.Text = "Stability: " .. tostring(Settings.ManualStabilityFrames) .. " frames [manual]"
     else
-        stabilityLabel.Text = "Stability: -- [idle]"
+        stabilityLabel.Text = "Stability: --"
     end
 end)
 
--- ══════════════════════════════════════════════════════════════════
---                        БИНД ЗАКРЫТИЯ/ОТКРЫТИЯ (INSERT)
--- ══════════════════════════════════════════════════════════════════
+RunService:BindToRenderStep("HVH_SilentReturn", Enum.RenderPriority.Camera.Value + 2, function()
+    if not (Settings.SilentReturnCFrame and Settings.SilentReturnFrames > 0) then return end
+    if Settings.IsFiring then return end
+    Settings.SilentReturnFrames = Settings.SilentReturnFrames - 1
+    if not UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
+        Camera.CFrame = Camera.CFrame:Lerp(Settings.SilentReturnCFrame, 0.7)
+    end
+    if Settings.SilentReturnFrames <= 0 then Settings.SilentReturnCFrame = nil end
+end)
+
 UserInputService.InputBegan:Connect(function(input, processed)
     if input.KeyCode == Enum.KeyCode.Insert then
-        local targetState = not MainFrame.Visible
-        MainFrame.Visible = targetState
-        GlowFrame.Visible = targetState
+        MainFrame.Visible = not MainFrame.Visible
+        GlowFrame.Visible = MainFrame.Visible
     end
 end)
 
--- Драггинг менюшки
-local MainFrameUI = ScreenGui:WaitForChild("HVH_OBKAK_Menu", 2) or MainFrame
-local GlowFrameUI = ScreenGui:FindFirstChild("Frame") or GlowFrame
-local isDragging = false
-local dragStart, startPos
-
-MainFrameUI.InputBegan:Connect(function(input)
+local isDragging, dragStart, startPos = false, nil, nil
+MainFrame.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 and not Settings.IsDraggingSlider then
         isDragging = true
         dragStart  = input.Position
-        startPos   = MainFrameUI.Position
+        startPos   = MainFrame.Position
     end
 end)
 
 UserInputService.InputChanged:Connect(function(input)
     if isDragging and input.UserInputType == Enum.UserInputType.MouseMovement and dragStart then
         local delta = input.Position - dragStart
-        local newPos = UDim2.new(
-            startPos.X.Scale, startPos.X.Offset + delta.X,
-            startPos.Y.Scale, startPos.Y.Offset + delta.Y
-        )
-        MainFrameUI.Position = newPos
-        if GlowFrameUI then
-            GlowFrameUI.Position = UDim2.new(
-                newPos.X.Scale, newPos.X.Offset - 10,
-                newPos.Y.Scale, newPos.Y.Offset - 10
-            )
-        end
+        local newPos = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+        MainFrame.Position = newPos
+        GlowFrame.Position = UDim2.new(newPos.X.Scale, newPos.X.Offset - 10, newPos.Y.Scale, newPos.Y.Offset - 10)
     end
 end)
 
 UserInputService.InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        isDragging = false
-    end
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then isDragging = false end
 end)
 
--- По умолчанию открываем вкладку Aimbot при первом запуске
 aimBtn.TextColor3 = C.Text
 aimBtn.BackgroundColor3 = Color3.fromRGB(22, 22, 36)
 aimUL.BackgroundTransparency = 0

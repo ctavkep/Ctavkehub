@@ -34,6 +34,12 @@ local Settings = {
     MaxDistance      = 1500,
     ChamsTransparency= 0.5,
 
+    -- Логика разделения Бэктрека
+    BacktrackMaster  = false, 
+    BacktrackESP     = false, 
+    BacktrackMS       = 600,  
+    BacktrackColor    = Color3.fromRGB(0, 180, 255),
+
     TP_Enabled       = false,
     TP_Distance      = 10,
     TP_Transparency  = 0.5,
@@ -45,10 +51,9 @@ local Settings = {
     JitterDegree     = 65,
     JitterSpeed      = 45,
 
-    -- Новые настройки для Pitch Anti-Aim (взгляд вниз через мышь)
-    HeadDownEnabled  = false,   -- Тумблер включения
-    HeadDownPitch    = 90,      -- Угол наклона (90 = строго в пол)
-    CurrentTarget    = nil,     -- Сюда аимбот будет слать текущую цель для отключения хука
+    HeadDownEnabled  = false,   
+    HeadDownPitch    = 90,      
+    CurrentTarget    = nil,     
 
     SilentReturnCFrame = nil,
     SilentReturnFrames = 0,
@@ -65,7 +70,7 @@ local Settings = {
     _prefireStartTime     = 0,
     _shotCheckTarget      = nil,
     _shotCheckTime        = 0,
-    _shotCheckHealth      = 0,
+    _shotCheckHealth      = 0
 }
 
 local PriorityParts = {
@@ -73,6 +78,12 @@ local PriorityParts = {
     "LeftUpperArm","RightUpperArm","LeftUpperLeg","RightUpperLeg"
 }
 local ESP_CACHE = {}
+
+local playerHistory = {}
+local activeGhosts = {}
+local ghostFolder = workspace:FindFirstChild("LocalBacktracks") or Instance.new("Folder")
+ghostFolder.Name = "LocalBacktracks"
+ghostFolder.Parent = workspace
 
 local function safe(fn, ...)
     local ok, err = pcall(fn, ...)
@@ -105,7 +116,7 @@ local function IsVisible(part, targetCharacter)
 
     local params = RaycastParams.new()
     params.FilterType = Enum.RaycastFilterType.Exclude
-    params.FilterDescendantsInstances = {character, targetCharacter, Camera}
+    params.FilterDescendantsInstances = {character, targetCharacter, Camera, ghostFolder}
     params.IgnoreWater = true
 
     local okCam,  resCam  = pcall(workspace.Raycast, workspace, camOrigin,  targetPos - camOrigin,  params)
@@ -123,6 +134,28 @@ end
 
 local function getBestPart(character)
     if not character then return nil end
+    
+    local targetPlayer = Players:GetPlayerFromCharacter(character)
+    if Settings.BacktrackMaster and targetPlayer and activeGhosts[targetPlayer.Name] then
+        local ghostData = activeGhosts[targetPlayer.Name]
+        if ghostData and ghostData.model then
+            local partName = Settings.TARGET_PART
+            if partName ~= "All" then
+                if partName == "Random" then
+                    partName = PriorityParts[math.random(1, 3)]
+                end
+                local p = ghostData.model:FindFirstChild(partName)
+                if p and IsVisible(p, ghostData.model) then return p end
+                return nil
+            end
+            for _, name in ipairs(PriorityParts) do
+                local p = ghostData.model:FindFirstChild(name)
+                if p and IsVisible(p, ghostData.model) then return p end
+            end
+            return nil
+        end
+    end
+
     local partName = Settings.TARGET_PART
     if partName ~= "All" then
         if partName == "Random" then
@@ -139,100 +172,150 @@ local function getBestPart(character)
     return nil
 end
 
-local function GetESPData(player)
-    if not ESP_CACHE[player] then
+local function GetESPData(id)
+    if not ESP_CACHE[id] then
         local ok, result = pcall(function()
             return { Name = Drawing.new("Text"), Health = Drawing.new("Text") }
         end)
-        if ok then ESP_CACHE[player] = result else return nil end
+        if ok then ESP_CACHE[id] = result else return nil end
     end
-    return ESP_CACHE[player]
+    return ESP_CACHE[id]
 end
 
-local function RemoveESP(player)
-    if ESP_CACHE[player] then
+local function RemoveESP(id)
+    if ESP_CACHE[id] then
         safe(function()
-            if ESP_CACHE[player].Name   then ESP_CACHE[player].Name:Remove()   end
-            if ESP_CACHE[player].Health then ESP_CACHE[player].Health:Remove()  end
+            if ESP_CACHE[id].Name   then ESP_CACHE[id].Name:Remove()   end
+            if ESP_CACHE[id].Health then ESP_CACHE[id].Health:Remove()  end
         end)
-        ESP_CACHE[player] = nil
+        ESP_CACHE[id] = nil
     end
 end
-Players.PlayerRemoving:Connect(RemoveESP)
+
+Players.PlayerRemoving:Connect(function(p)
+    RemoveESP(p.Name)
+end)
+
+local function ApplyModelVisuals(model, id, nameTag, color, currentHealth, maxHealth, isGhost)
+    if isGhost then
+        if Settings.ShowChams and Settings.BacktrackMaster and Settings.BacktrackESP then
+            local h = model:FindFirstChild("OBKAK_GhostHighlight")
+            if not h then
+                h = Instance.new("Highlight")
+                h.Name = "OBKAK_GhostHighlight"
+                h.Parent = model
+            end
+            h.Enabled = true
+            h.FillColor = Settings.BacktrackColor
+            h.OutlineColor = Color3.new(1, 1, 1)
+            h.FillTransparency = Settings.ChamsTransparency
+            h.OutlineTransparency = 0.2
+            h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+        else
+            local hl = model:FindFirstChild("OBKAK_GhostHighlight")
+            if hl then hl.Enabled = false end
+        end
+        return
+    end
+
+    local head = model:FindFirstChild("Head")
+    local data = GetESPData(id)
+    if not data or not head then return end
+    local pos, onScreen = Camera:WorldToViewportPoint(head.Position)
+    local dist = (Camera.CFrame.Position - head.Position).Magnitude
+
+    if onScreen and dist <= Settings.MaxDistance then
+        if Settings.ShowNames then
+            data.Name.Text     = nameTag
+            data.Name.Position = Vector2.new(pos.X, pos.Y - 30)
+            data.Name.Color    = color
+            data.Name.Visible  = true
+            data.Name.Outline  = true
+            data.Name.Size     = 14
+        else
+            data.Name.Visible = false
+        end
+
+        if Settings.ShowHealth and currentHealth then
+            data.Health.Text     = "HP: " .. math.floor(currentHealth)
+            data.Health.Position = Vector2.new(pos.X, pos.Y - 15)
+            data.Health.Color    = Color3.new(1,1,1)
+            data.Health.Visible  = true
+            data.Health.Outline  = true
+            data.Health.Size     = 13
+        else
+            data.Health.Visible = false
+        end
+
+        if Settings.ShowChams then
+            local h = model:FindFirstChild("OBKAK_Highlight")
+            if not h then
+                h = Instance.new("Highlight")
+                h.Name = "OBKAK_Highlight"
+                h.Parent = model
+            end
+            h.Enabled          = true
+            h.FillColor        = color
+            h.FillTransparency = Settings.ChamsTransparency
+            h.DepthMode        = Enum.HighlightDepthMode.AlwaysOnTop
+        else
+            local hl = model:FindFirstChild("OBKAK_Highlight")
+            if hl then hl.Enabled = false end
+        end
+    else
+        data.Name.Visible   = false
+        data.Health.Visible = false
+        local hl = model:FindFirstChild("OBKAK_Highlight")
+        if hl then hl.Enabled = false end
+    end
+end
 
 local function UpdateESP()
+    if not Settings.ESPEnabled then
+        for id, _ in pairs(ESP_CACHE) do
+            RemoveESP(id)
+        end
+        return
+    end
+
     for _, p in ipairs(Players:GetPlayers()) do
         if p == LocalPlayer then continue end
+        
+        -- Обычные Игроки
         safe(function()
             local char = p.Character
             local head = char and char:FindFirstChild("Head")
             local hum  = char and char:FindFirstChildOfClass("Humanoid")
-            local data = GetESPData(p)
-            if not data then return end
-
-            local visible = Settings.ESPEnabled and head and hum and hum.Health > 0
-
-            if visible then
+            
+            if head and hum and hum.Health > 0 then
                 local isTeam = (p.Team == LocalPlayer.Team)
                 if Settings.ESPTeamCheck and isTeam then
-                    data.Name.Visible = false
-                    data.Health.Visible = false
+                    RemoveESP(p.Name)
                     local hl = char:FindFirstChild("OBKAK_Highlight")
                     if hl then hl.Enabled = false end
-                    return
-                end
-
-                local pos, onScreen = Camera:WorldToViewportPoint(head.Position)
-                local dist = (Camera.CFrame.Position - head.Position).Magnitude
-
-                if onScreen and dist <= Settings.MaxDistance then
-                    local color = isTeam and Color3.new(0,1,0) or Color3.new(1,0,0)
-                    if Settings.ShowNames then
-                        data.Name.Text     = p.Name
-                        data.Name.Position = Vector2.new(pos.X, pos.Y - 30)
-                        data.Name.Color    = color
-                        data.Name.Visible  = true
-                        data.Name.Outline  = true
-                        data.Name.Size     = 14
-                    else
-                        data.Name.Visible = false
-                    end
-                    if Settings.ShowHealth then
-                        data.Health.Text     = "HP: " .. math.floor(hum.Health)
-                        data.Health.Position = Vector2.new(pos.X, pos.Y - 15)
-                        data.Health.Color    = Color3.new(1,1,1)
-                        data.Health.Visible  = true
-                        data.Health.Outline  = true
-                        data.Health.Size     = 13
-                    else
-                        data.Health.Visible = false
-                    end
-
-                    if Settings.ShowChams then
-                        local h = char:FindFirstChild("OBKAK_Highlight")
-                        if not h then
-                            h = Instance.new("Highlight")
-                            h.Name = "OBKAK_Highlight"
-                            h.Parent = char
-                        end
-                        h.Enabled          = true
-                        h.FillColor        = color
-                        h.FillTransparency = Settings.ChamsTransparency
-                    else
-                        local hl = char:FindFirstChild("OBKAK_Highlight")
-                        if hl then hl.Enabled = false end
-                    end
                 else
-                    data.Name.Visible   = false
-                    data.Health.Visible = false
-                    local hl = char:FindFirstChild("OBKAK_Highlight")
-                    if hl then hl.Enabled = false end
+                    local color = isTeam and Color3.new(0,1,0) or Color3.new(1,0,0)
+                    ApplyModelVisuals(char, p.Name, p.Name, color, hum.Health, hum.MaxHealth, false)
                 end
             else
-                data.Name.Visible   = false
-                data.Health.Visible = false
-                if char then
-                    local hl = char:FindFirstChild("OBKAK_Highlight")
+                RemoveESP(p.Name)
+            end
+        end)
+
+        -- Бэктрек Призраки
+        safe(function()
+            local ghostData = activeGhosts[p.Name]
+            if Settings.BacktrackMaster and Settings.BacktrackESP and ghostData and ghostData.model and ghostData.model:FindFirstChild("Head") then
+                local isTeam = (p.Team == LocalPlayer.Team)
+                if Settings.ESPTeamCheck and isTeam then
+                    local hl = ghostData.model:FindFirstChild("OBKAK_GhostHighlight")
+                    if hl then hl.Enabled = false end
+                else
+                    ApplyModelVisuals(ghostData.model, p.Name .. "_Ghost", "", Settings.BacktrackColor, nil, nil, true)
+                end
+            else
+                if ghostData and ghostData.model then
+                    local hl = ghostData.model:FindFirstChild("OBKAK_GhostHighlight")
                     if hl then hl.Enabled = false end
                 end
             end
@@ -271,7 +354,7 @@ safe(function()
 end)
 
 local fovGui = Instance.new("ScreenGui", CoreGui)
-fovGui.Name         = "SilentGui"
+fovGui.Name   = "SilentGui"
 fovGui.ResetOnSpawn = false
 
 local circle = Instance.new("Frame", fovGui)
@@ -286,7 +369,7 @@ stroke.Thickness = 1.5
 Instance.new("UICorner", circle).CornerRadius = UDim.new(1, 0)
 
 local ScreenGui = Instance.new("ScreenGui", CoreGui)
-ScreenGui.Name            = "HVH_OBKAK_Menu"
+ScreenGui.Name      = "HVH_OBKAK_Menu"
 ScreenGui.ResetOnSpawn    = false
 ScreenGui.ZIndexBehavior  = Enum.ZIndexBehavior.Sibling
 
@@ -371,7 +454,7 @@ Badge.BackgroundColor3 = C.AccentDim
 Badge.BorderSizePixel  = 0
 Instance.new("UICorner", Badge).CornerRadius = UDim.new(0, 5)
 local BadgeGrad = Instance.new("UIGradient", Badge)
-BadgeGrad.Color    = ColorSequence.new(C.AccentDim, C.VioletDim)
+BadgeGrad.Color = ColorSequence.new(C.AccentDim, C.VioletDim)
 local BadgeLbl = Instance.new("TextLabel", Badge)
 BadgeLbl.Text          = "ultimate"
 BadgeLbl.Size           = UDim2.new(1, 0, 1, 0)
@@ -489,6 +572,7 @@ local function CreateTab(name)
     page.AutomaticCanvasSize = Enum.AutomaticSize.Y
     page.CanvasSize     = UDim2.new(0, 0, 0, 0)
     page.BorderSizePixel  = 0
+    
     local layout = Instance.new("UIListLayout", page)
     layout.Padding = UDim.new(0, 5)
     layout.SortOrder     = Enum.SortOrder.LayoutOrder
@@ -640,7 +724,7 @@ local function CreateSlider(parent, text, minVal, maxVal, default, callback)
     valLbl.Position       = UDim2.new(0.64, -14, 0, 8)
     valLbl.TextColor3     = C.Accent
     valLbl.TextSize       = 14
-    valLbl.Font           = Enum.Font.GothamBold
+    valLbl.Font            = Enum.Font.GothamBold
     valLbl.BackgroundTransparency = 1
     valLbl.TextXAlignment = Enum.TextXAlignment.Right
 
@@ -674,7 +758,7 @@ local function CreateSlider(parent, text, minVal, maxVal, default, callback)
 
     local hitbox = Instance.new("TextButton", container)
     hitbox.Size             = UDim2.new(1, -28, 0, 22)
-    hitbox.Position         = UDim2.new(0, 14, 0, 26)
+    hitbox.Position          = UDim2.new(0, 14, 0, 26)
     hitbox.BackgroundTransparency = 1
     hitbox.Text             = ""
 
@@ -721,7 +805,7 @@ local ragePage = CreateTab("Rage")
 local miscPage = CreateTab("Misc")
 
 -- ══════════════════════════════════════════════════════════════════
---                        AIMBOT PAGE
+--                         AIMBOT PAGE
 -- ══════════════════════════════════════════════════════════════════
 CreateSectionLabel(aimPage, "GENERAL")
 CreateToggle(aimPage, "Aimbot Enabled", Settings.AimbotEnabled, function(v) Settings.AimbotEnabled = v circle.Visible = v end)
@@ -729,7 +813,6 @@ CreateToggle(aimPage, "Wall Check", Settings.AimbotWallCheck, function(v) Settin
 CreateToggle(aimPage, "Team Check", Settings.AimbotTeamCheck, function(v) Settings.AimbotTeamCheck = v end)
 CreateSlider(aimPage, "FOV Radius", 30, 600, Settings.FOV_RADIUS, function(v) Settings.FOV_RADIUS = v end)
 CreateToggle(aimPage, "Auto Fire", Settings.AutoFire, function(v) Settings.AutoFire = v end)
-
 
 CreateSectionLabel(aimPage, "TARGETING")
 CreateToggle(aimPage, "Fix Aim (Peek Fix)", Settings.FixAim, function(v) Settings.FixAim = v end)
@@ -741,6 +824,7 @@ HBOuter.BackgroundColor3 = C.Card
 HBOuter.BorderSizePixel = 0
 Instance.new("UICorner", HBOuter).CornerRadius = UDim.new(0, 10)
 Instance.new("UIStroke", HBOuter).Color = C.Border
+
 local HBLabel = Instance.new("TextLabel", HBOuter)
 HBLabel.Text = "Target Part"
 HBLabel.Size = UDim2.new(0.5, 0, 1, 0)
@@ -771,12 +855,45 @@ HitboxBtn.MouseButton1Click:Connect(function()
 end)
 
 CreateSectionLabel(aimPage, "AUTOMATION")
+
 local function DoAutoFirePreSnapped(originalCF)
     if Settings.IsFiring then return end
     Settings.IsFiring = true
     Settings.LastShotTime = tick()
+
     pcall(function()
-        if mouse1press then
+        if Settings.BacktrackMaster and Settings.CurrentTarget then
+            local targetPlayer = Settings.CurrentTarget
+            local ghostData = activeGhosts[targetPlayer.Name]
+            
+            if ghostData and ghostData.model and targetPlayer.Character then
+                local targetChar = targetPlayer.Character
+                local targetHRP  = targetChar:FindFirstChild("HumanoidRootPart")
+                local targetHead = targetChar:FindFirstChild("Head")
+                local ghostHead  = ghostData.model:FindFirstChild("Head")
+                
+                if targetHRP and targetHead and ghostHead then
+                    local mousePos = UserInputService:GetMouseLocation()
+                    local ray = Camera:ViewportPointToRay(mousePos.X, mousePos.Y)
+                    
+                    local ghostParams = RaycastParams.new()
+                    ghostParams.FilterDescendantsInstances = {ghostData.model}
+                    ghostParams.FilterType = Enum.RaycastFilterType.Include
+                    local ghostRaycast = workspace:Raycast(ray.Origin, ray.Direction * 1000, ghostParams)
+                    
+                    if ghostRaycast then
+                        local hitPoint = ghostRaycast.Position
+                        local ghostHRPFrame = ghostData.model:GetPivot()
+                        local newHRPPosition = hitPoint - (ghostHead.Position - ghostHRPFrame.Position)
+                        targetHRP.CFrame = CFrame.new(newHRPPosition) * (ghostHRPFrame - ghostHRPFrame.Position)
+                    end
+                end
+            end
+        end
+
+        if mouse1click then
+            mouse1click()
+        elseif mouse1press and mouse1release then
             mouse1press()
             task.wait(0.01)
             mouse1release()
@@ -787,6 +904,7 @@ local function DoAutoFirePreSnapped(originalCF)
                 if tool then safe(function() tool:Activate() end) end
             end
         end
+
         if originalCF then
             Settings.SilentReturnCFrame = originalCF
             Settings.SilentReturnFrames = 5
@@ -812,6 +930,7 @@ stabDot.Position = UDim2.new(0, 13, 0.5, -3)
 stabDot.BackgroundColor3 = C.GreenOn
 stabDot.BorderSizePixel = 0
 Instance.new("UICorner", stabDot).CornerRadius = UDim.new(1, 0)
+
 local stabilityLabel = Instance.new("TextLabel", stabCard)
 stabilityLabel.Size = UDim2.new(1, -34, 1, 0)
 stabilityLabel.Position = UDim2.new(0, 26, 0, 0)
@@ -826,45 +945,201 @@ CreateSlider(aimPage, "Manual Stability Frames", 0, 10, Settings.ManualStability
 CreateSlider(aimPage, "Fire Rate (sec)", 0.1, 5, Settings.FIRE_RATE, function(v) Settings.FIRE_RATE = v end)
 
 -- ══════════════════════════════════════════════════════════════════
---                        VISUALS PAGE
+--                         VISUALS PAGE 
 -- ══════════════════════════════════════════════════════════════════
 CreateSectionLabel(espPage, "RENDERING")
 CreateToggle(espPage, "ESP Master", Settings.ESPEnabled, function(v) Settings.ESPEnabled = v end)
 CreateToggle(espPage, "Show Names", Settings.ShowNames, function(v) Settings.ShowNames = v end)
 CreateToggle(espPage, "Show Health", Settings.ShowHealth, function(v) Settings.ShowHealth = v end)
 CreateToggle(espPage, "Show Chams", Settings.ShowChams, function(v) Settings.ShowChams = v end)
+
 CreateSectionLabel(espPage, "FILTERS")
 CreateToggle(espPage, "Team Check", Settings.ESPTeamCheck, function(v) Settings.ESPTeamCheck = v end)
 CreateSlider(espPage, "Max Distance", 100, 5000, Settings.MaxDistance, function(v) Settings.MaxDistance = v end)
 
+CreateSectionLabel(espPage, "BACKTRACK VISUALS")
+CreateToggle(espPage, "Backtrack ESP (Chams)", Settings.BacktrackESP, function(v) Settings.BacktrackESP = v end)
+
 -- ══════════════════════════════════════════════════════════════════
---                        RAGE PAGE
+--                         RAGE PAGE
 -- ══════════════════════════════════════════════════════════════════
 CreateSectionLabel(ragePage, "ANTI-AIM")
 CreateToggle(ragePage, "Jitter Anti-Aim", Settings.JitterEnabled, function(v) Settings.JitterEnabled = v end)
 CreateSlider(ragePage, "Jitter Degree", 10, 180, Settings.JitterDegree, function(v) Settings.JitterDegree = v end)
 CreateSlider(ragePage, "Jitter Speed", 5, 100, Settings.JitterSpeed, function(v) Settings.JitterSpeed = v end)
 
--- ✅ ДОБАВЛЕНО: Интерфейс для Pitch Mouse Anti-Aim в Rage таб
 CreateToggle(ragePage, "Pitch Mouse Anti-Aim", Settings.HeadDownEnabled, function(v) Settings.HeadDownEnabled = v end)
 CreateSlider(ragePage, "Pitch Angle (Degree)", 0, 90, Settings.HeadDownPitch, function(v) Settings.HeadDownPitch = v end)
 
 -- ══════════════════════════════════════════════════════════════════
---                        MISC PAGE
+--                         MISC PAGE
 -- ══════════════════════════════════════════════════════════════════
-CreateSectionLabel(miscPage, "THIRD PERSON")
-CreateToggle(miscPage, "TP Enabled", Settings.TP_Enabled, function(v)
-    Settings.TP_Enabled = v
+CreateSectionLabel(miscPage, "MECHANICS")
+CreateToggle(miscPage, "Backtrack Master", Settings.BacktrackMaster, function(v) 
+    Settings.BacktrackMaster = v 
     if not v then
-        LocalPlayer.CameraMaxZoomDistance = defaultMaxZoom
-        LocalPlayer.CameraMinZoomDistance = defaultMinZoom
+        ghostFolder:ClearAllChildren()
+        table.clear(activeGhosts)
     end
 end)
+CreateSlider(miscPage, "Backtrack MS (Delay)", 1, 1000, Settings.BacktrackMS, function(v) Settings.BacktrackMS = v end)
+
+CreateSectionLabel(miscPage, "THIRD PERSON")
+CreateToggle(miscPage, "TP Enabled", Settings.TP_Enabled, function(v) Settings.TP_Enabled = v if not v then LocalPlayer.CameraMaxZoomDistance = defaultMaxZoom LocalPlayer.CameraMinZoomDistance = defaultMinZoom end end)
 CreateSlider(miscPage, "TP Distance", 5, 50, Settings.TP_Distance, function(v) Settings.TP_Distance = v end)
 CreateSlider(miscPage, "Transparency", 0.1, 1, Settings.TP_Transparency, function(v) Settings.TP_Transparency = v end)
 
 -- ══════════════════════════════════════════════════════════════════
---                        SILENT RETURN
+--              PURE R6 GHOST GENERATOR + HUMANOID FIX
+-- ══════════════════════════════════════════════════════════════════
+local function createPureR6Model(playerName)
+    local model = Instance.new("Model")
+    model.Name = playerName .. "_Backtrack"
+    
+    -- Добавляем пустой Humanoid. Без него Highlight.AlwaysOnTop на кастомных моделях багует сквозь стены.
+    local hum = Instance.new("Humanoid")
+    hum.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+    hum.Parent = model
+    
+    local r6Parts = {
+        {"HumanoidRootPart", Vector3.new(2, 2, 1)},
+        {"Torso", Vector3.new(2, 2, 1)},
+        {"Head", Vector3.new(1.2, 1.2, 1.2)},
+        {"Left Arm", Vector3.new(1, 2, 1)},
+        {"Right Arm", Vector3.new(1, 2, 1)},
+        {"Left Leg", Vector3.new(1, 2, 1)},
+        {"Right Leg", Vector3.new(1, 2, 1)}
+    }
+    
+    for _, partData in ipairs(r6Parts) do
+        local p = Instance.new("Part")
+        p.Name = partData[1]
+        p.Size = partData[2]
+        p.CanCollide = false
+        p.Anchored = true
+        p.Transparency = 0.55
+        p.Material = Enum.Material.ForceField
+        p.Color = Settings.BacktrackColor
+        p.Parent = model
+        
+        -- Дублирующий Adornment рендер на случай, если движок блочит Highlight на ForceField.
+        -- Это 100% пробивает любые стены.
+        local box = Instance.new("BoxHandleAdornment")
+        box.Name = "WallPierce"
+        box.Size = p.Size
+        box.AlwaysOnTop = true
+        box.ZIndex = 5
+        box.Color3 = Settings.BacktrackColor
+        box.Transparency = 0.65
+        box.Adornee = p
+        box.Parent = p
+    end
+    
+    model.PrimaryPart = model:WaitForChild("HumanoidRootPart")
+    model.Parent = ghostFolder
+    return model
+end
+
+local function localAssembleR6(model, baseCFrame)
+    model:PivotTo(baseCFrame)
+    model["Torso"].CFrame = baseCFrame
+    model["Head"].CFrame = baseCFrame * CFrame.new(0, 1.5, 0)
+    model["Left Arm"].CFrame = baseCFrame * CFrame.new(-1.5, 0, 0)
+    model["Right Arm"].CFrame = baseCFrame * CFrame.new(1.5, 0, 0)
+    model["Left Leg"].CFrame = baseCFrame * CFrame.new(-0.5, -2, 0)
+    model["Right Leg"].CFrame = baseCFrame * CFrame.new(0.5, -2, 0)
+end
+
+-- ══════════════════════════════════════════════════════════════════
+--                         HEARTBEAT BACKTRACK LOOP
+-- ══════════════════════════════════════════════════════════════════
+RunService.Heartbeat:Connect(function()
+    if not Settings.BacktrackMaster then return end
+    local currentTime = os.clock()
+    local backtrackLimitSec = Settings.BacktrackMS / 1000
+    
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            local char = player.Character
+            if char and char:FindFirstChild("HumanoidRootPart") and char:FindFirstChild("Humanoid") and char.Humanoid.Health > 0 then
+                
+                if not playerHistory[player.Name] then
+                    playerHistory[player.Name] = {}
+                end
+                
+                table.insert(playerHistory[player.Name], {
+                    time = currentTime,
+                    cframe = char.HumanoidRootPart.CFrame
+                })
+                
+                while #playerHistory[player.Name] > 0 and (currentTime - playerHistory[player.Name][1].time) > backtrackLimitSec do
+                    table.remove(playerHistory[player.Name], 1)
+                end
+                
+                local history = playerHistory[player.Name]
+                local targetTime = currentTime - backtrackLimitSec
+                local closestFrame = nil
+                local minDiff = math.huge
+                
+                for _, frame in ipairs(history) do
+                    local diff = math.abs(frame.time - targetTime)
+                    if diff < minDiff then
+                        minDiff = diff
+                        closestFrame = frame
+                    end
+                end
+                
+                if closestFrame then
+                    if not activeGhosts[player.Name] then
+                        local ghostModel = createPureR6Model(player.Name)
+                        activeGhosts[player.Name] = {
+                            model = ghostModel,
+                            player = player
+                        }
+                    end
+                    
+                    local ghostData = activeGhosts[player.Name]
+                    if ghostData and ghostData.model then
+                        local rawCFrame = closestFrame.cframe
+                        
+                        local floorParams = RaycastParams.new()
+                        floorParams.FilterDescendantsInstances = {char, ghostData.model, ghostFolder, LocalPlayer.Character}
+                        floorParams.FilterType = Enum.RaycastFilterType.Exclude
+                        
+                        local floorResult = workspace:Raycast(rawCFrame.Position + Vector3.new(0, 5, 0), Vector3.new(0, -15, 0), floorParams)
+                        
+                        if floorResult then
+                            local fixedPosition = Vector3.new(rawCFrame.X, floorResult.Position.Y + 3, rawCFrame.Z)
+                            localAssembleR6(ghostData.model, CFrame.new(fixedPosition) * (rawCFrame - rawCFrame.Position))
+                        else
+                            localAssembleR6(ghostData.model, rawCFrame)
+                        end
+                        
+                        -- Обновление динамической видимости Adornments
+                        for _, child in ipairs(ghostData.model:GetChildren()) do
+                            if child:IsA("Part") then
+                                local wp = child:FindFirstChild("WallPierce")
+                                if wp then
+                                    wp.Visible = Settings.BacktrackESP
+                                    wp.Color3 = Settings.BacktrackColor
+                                    wp.Transparency = Settings.ChamsTransparency + 0.15
+                                end
+                            end
+                        end
+                    end
+                end
+            else
+                if activeGhosts[player.Name] then
+                    if activeGhosts[player.Name].model then activeGhosts[player.Name].model:Destroy() end
+                    activeGhosts[player.Name] = nil
+                end
+            end
+        end
+    end
+end)
+
+-- ══════════════════════════════════════════════════════════════════
+--                         SILENT RETURN
 -- ══════════════════════════════════════════════════════════════════
 RunService:BindToRenderStep("HVH_SilentReturn", Enum.RenderPriority.Camera.Value + 2, function()
     if not (Settings.SilentReturnCFrame and Settings.SilentReturnFrames > 0) then return end
@@ -877,18 +1152,20 @@ RunService:BindToRenderStep("HVH_SilentReturn", Enum.RenderPriority.Camera.Value
     if not UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
         Camera.CFrame = Camera.CFrame:Lerp(Settings.SilentReturnCFrame, 0.6)
     end
-    if Settings.SilentReturnFrames <= 0 then Settings.SilentReturnCFrame = nil end
+    if Settings.SilentReturnFrames <= 0 then
+        Settings.SilentReturnCFrame = nil
+    end
 end)
 
 -- ══════════════════════════════════════════════════════════════════
---                        ANTI-AIM & THIRD PERSON
+--                      ANTI-AIM & THIRD PERSON
 -- ══════════════════════════════════════════════════════════════════
 local wasJittering = false
 RunService:BindToRenderStep("HVH_AntiAim_TP", Enum.RenderPriority.Camera.Value + 1, function()
     local char = LocalPlayer.Character
     if not char then return end
     local root = char:FindFirstChild("HumanoidRootPart")
-    local hum = char:FindFirstChildOfClass("Humanoid")
+    local hum  = char:FindFirstChildOfClass("Humanoid")
     if not root or not hum or hum.Health <= 0 then return end
 
     if Settings.JitterEnabled or Settings.TP_Enabled then
@@ -910,237 +1187,154 @@ RunService:BindToRenderStep("HVH_AntiAim_TP", Enum.RenderPriority.Camera.Value +
     else
         if wasJittering then hum.AutoRotate = true; wasJittering = false end
     end
-end)
 
--- ══════════════════════════════════════════════════════════════════
---             ✅ ДОБАВЛЕНО: УМНЫЙ ХУК МЫШКИ (PITCH ANTI-AIM)
--- ══════════════════════════════════════════════════════════════════
-local Mouse = LocalPlayer:GetMouse()
-local oldIndex
-oldIndex = hookmetamethod(game, "__index", function(self, key)
-    if self == Mouse and (key == "Hit" or key == "hit") then
-        if not checkcaller() and Settings.HeadDownEnabled then
-            -- МГНОВЕННО ОТКЛЮЧАЕМ ПОДМЕНУ, ЕСЛИ:
-            -- 1. Аимбот видит врага в FOV (Settings.CurrentTarget)
-            -- 2. Идет анимация наведения/стабилизации (_prefireActive)
-            -- 3. Выполняется функция симуляции клика (IsFiring / isSnapped)
-            -- 4. Зажата физическая кнопка мыши (MouseButton1)
-            if Settings.IsFiring or Settings.isSnapped or Settings._prefireActive or Settings.CurrentTarget or UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
-                return oldIndex(self, key)
-            end
-            
-            local character = LocalPlayer.Character
-            local root = character and (character:FindFirstChild("HumanoidRootPart") or character:FindFirstChild("Torso"))
-            
-            if root then
-                -- Динамический расчет точки на основе ползунка (Settings.HeadDownPitch)
-                -- 90 градусов = строго под ноги. 0 градусов = прямо перед собой.
-                local angle = math.rad(Settings.HeadDownPitch or 90)
-                local forwardComponent = math.cos(angle)
-                local downComponent = math.sin(angle)
-                
-                local targetPos = root.Position + (root.CFrame.LookVector * forwardComponent * 10) - (Vector3.new(0, 1, 0) * downComponent * 10)
-                return CFrame.new(targetPos)
+    if Settings.TP_Enabled then
+        LocalPlayer.CameraMaxZoomDistance = Settings.TP_Distance
+        LocalPlayer.CameraMinZoomDistance = Settings.TP_Distance
+        for _, part in ipairs(char:GetDescendants()) do
+            if part:IsA("BasePart") then
+                part.LocalTransparencyModifier = Settings.TP_Transparency
             end
         end
     end
-    return oldIndex(self, key)
 end)
 
 -- ══════════════════════════════════════════════════════════════════
---                        MAIN LOOP
+--                        ОСНОВНОЙ РАБОЧИЙ ЦИКЛ АИМБОТА
 -- ══════════════════════════════════════════════════════════════════
-RunService.RenderStepped:Connect(function()
-    safe(UpdateESP)
-
-    safe(function()
-        if Settings.AdaptiveFireEnabled then
-            local statusStr = Settings._prefireActive and (" | pre: " .. Settings._prefireFrames .. "/" .. Settings._adaptiveStability) or ""
-            stabilityLabel.Text = "Stability: " .. Settings._adaptiveStability .. " frames [auto]" .. statusStr
-        else
-            stabilityLabel.Text = "Stability: " .. Settings.ManualStabilityFrames .. " frames [manual]"
+task.spawn(function()
+    while true do
+        task.wait()
+        if not Settings.AimbotEnabled then 
+            Settings.CurrentTarget = nil 
+            continue 
         end
-        if Settings.TP_Enabled and LocalPlayer.Character then
-            local char = LocalPlayer.Character
-            LocalPlayer.CameraMaxZoomDistance = Settings.TP_Distance
-            LocalPlayer.CameraMinZoomDistance = Settings.TP_Distance
-            for _, part in pairs(char:GetDescendants()) do
-                if part:IsA("BasePart") then part.LocalTransparencyModifier = Settings.TP_Transparency end
-            end
-            for _, obj in pairs(Camera:GetChildren()) do
-                if obj:IsA("Model") or obj:IsA("BasePart") then
-                    for _, p in pairs(obj:GetDescendants()) do
-                        if p:IsA("BasePart") then p.LocalTransparencyModifier = 1 end
+
+        local mousePos  = UserInputService:GetMouseLocation()
+        local bestTarget = nil
+        local bestDist   = Settings.FOV_RADIUS
+        local bestPartObj = nil
+
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p == LocalPlayer then continue end
+            if Settings.AimbotTeamCheck and p.Team == LocalPlayer.Team then continue end
+
+            local char = p.Character
+            if char and char:FindFirstChild("Head") and char:FindFirstChildOfClass("Humanoid") and char.Humanoid.Health > 0 then
+                local part = getBestPart(char)
+                if part then
+                    local screenPos, onScreen = Camera:WorldToViewportPoint(part.Position)
+                    if onScreen then
+                        local screenPos2D = Vector2.new(screenPos.X, screenPos.Y)
+                        local mag = (screenPos2D - mousePos).Magnitude
+                        if mag < bestDist then
+                            bestDist   = mag
+                            bestTarget = p 
+                            bestPartObj = part
+                        end
                     end
                 end
             end
         end
-    end)
 
-    if not Settings.AimbotEnabled then
-        Settings.CurrentTarget = nil -- Сбрасываем цель
-        if Settings._prefireActive then
-            if Settings._prefireOriginalCF then
-                Settings.SilentReturnCFrame = Settings._prefireOriginalCF
-                Settings.SilentReturnFrames = 5
-            end
-            Settings._prefireActive = false
-            Settings._prefireTarget = nil
-            Settings._prefireFrames = 0
-            Settings._prefireOriginalCF = nil
-        end
-        return
-    end
+        Settings.CurrentTarget = bestTarget
 
-    circle.Size = UDim2.new(0, Settings.FOV_RADIUS * 2, 0, Settings.FOV_RADIUS * 2)
-    local target, minDist = nil, Settings.FOV_RADIUS
-    local viewCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+        if bestTarget and bestPartObj then
+            local targetPos = bestPartObj.Position
+            local finalLookPos = GetAimLookTarget(targetPos)
 
-    for _, p in ipairs(Players:GetPlayers()) do
-        if p == LocalPlayer then continue end
-        safe(function()
-            if not p.Character then return end
-            local hum = p.Character:FindFirstChildOfClass("Humanoid")
-            if not hum or hum.Health <= 0 then return end
-            if Settings.AimbotTeamCheck and p.Team == LocalPlayer.Team then return end
-            local part = getBestPart(p.Character)
-            if not part then return end
-
-            local pos, onScreen = Camera:WorldToViewportPoint(part.Position)
-            if not onScreen then return end
-
-            local mag = (Vector2.new(pos.X, pos.Y) - viewCenter).Magnitude
-            if mag < minDist then
-                minDist = mag
-                target = part
-            end
-        end)
-    end
-
-    -- ✅ СИНХРОНИЗАЦИЯ: Отдаем цель в глобальные настройки для хука мыши
-    Settings.CurrentTarget = target 
-
-    if Settings._prefireActive and Settings._prefireTarget ~= target then
-        if Settings._prefireOriginalCF then
-            Settings.SilentReturnCFrame = Settings._prefireOriginalCF
-            Settings.SilentReturnFrames = 5
-        end
-        Settings._prefireActive = false
-        Settings._prefireTarget = nil
-        Settings._prefireFrames = 0
-        Settings._prefireOriginalCF = nil
-    end
-
-    if UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) and target then
-        safe(function()
-            if Settings._prefireActive then
-                Settings._prefireActive = false
-                Settings._prefireTarget = nil
-                Settings._prefireFrames = 0
-                Settings._prefireOriginalCF = nil
-            end
-            Settings.SilentReturnCFrame = nil
-            Settings.SilentReturnFrames = 0
-            local lookTarget = GetAimLookTarget(target.Position)
-            Camera.CFrame = CFrame.new(Camera.CFrame.Position, lookTarget)
-            Settings.isSnapped = true
-        end)
-    else
-        Settings.isSnapped = false
-        safe(function()
-            if Settings._shotCheckTarget then
-                if not Settings._shotCheckTarget.Parent then
-                    Settings._adaptiveStability = math.max(Settings._adaptiveMin, Settings._adaptiveStability - 1)
-                    Settings._shotCheckTarget = nil
-                elseif (tick() - Settings._shotCheckTime) >= 0.25 then
-                    local hum = Settings._shotCheckTarget.Parent:FindFirstChildOfClass("Humanoid")
-                    if hum then
-                        if hum.Health < Settings._shotCheckHealth then
-                            Settings._adaptiveStability = math.max(Settings._adaptiveMin, Settings._adaptiveStability - 1)
-                        else
-                            Settings._adaptiveStability = math.min(Settings._adaptiveMax, Settings._adaptiveStability + 1)
-                        end
-                    end
-                    Settings._shotCheckTarget = nil
+            if Settings.AutoFire then
+                local stability = Settings.ManualStabilityFrames
+                if Settings.AdaptiveFireEnabled then
+                    stability = Settings._adaptiveStability
                 end
-            end
 
-            if target and Settings.AutoFire and not Settings.IsFiring then
-                local t = target
-                if Settings._prefireActive and Settings._prefireTarget == t then
-                    Settings._prefireFrames = Settings._prefireFrames + 1
-                    local lookTarget = GetAimLookTarget(t.Position)
-                    Camera.CFrame = CFrame.new(Camera.CFrame.Position, lookTarget)
-                    
-                    local stabilityNeeded = Settings.AdaptiveFireEnabled and Settings._adaptiveStability or Settings.ManualStabilityFrames
-                    local timeout = (tick() - Settings._prefireStartTime) >= 0.4
-                    
-                    if Settings._prefireFrames >= stabilityNeeded or timeout then
-                        safe(function()
-                            local hum = t.Parent:FindFirstChildOfClass("Humanoid")
-                            if hum and hum.Health > 0 then
-                                Settings._shotCheckTarget = t
-                                Settings._shotCheckTime = tick()
-                                Settings._shotCheckHealth = hum.Health
-                            end
-                        end)
-                        local originalCF = Settings._prefireOriginalCF
-                        Settings._prefireActive = false
-                        Settings._prefireTarget = nil
-                        Settings._prefireFrames = 0
-                        Settings._prefireOriginalCF = nil
-                        
-                        if IsVisible(t, t.Parent) then
-                            task.spawn(DoAutoFirePreSnapped, originalCF)
-                        else
-                            if originalCF then
-                                Settings.SilentReturnCFrame = originalCF
-                                Settings.SilentReturnFrames = 5
-                            end
-                        end
+                local readyToShoot = true
+                if stability > 0 then
+                    if not Settings.isSnapped then
+                        Settings.isSnapped = true
+                        for i = 1, stability do RunService.RenderStepped:Wait() end
                     end
-                elseif target and not Settings.IsFiring and not Settings._prefireActive then
-                    if (tick() - Settings.LastShotTime) >= Settings.FIRE_RATE then
-                        if IsVisible(target, target.Parent) then
-                            Settings._prefireOriginalCF = Camera.CFrame
-                            local lookTarget = GetAimLookTarget(target.Position)
-                            Camera.CFrame = CFrame.new(Camera.CFrame.Position, lookTarget)
-                            Settings._prefireActive = true
-                            Settings._prefireTarget = target
-                            Settings._prefireFrames = 0
-                            Settings._prefireStartTime = tick()
-                        end
-                    end
+                end
+
+                if tick() - Settings.LastShotTime >= Settings.FIRE_RATE and readyToShoot then
+                    local oldCF = Camera.CFrame
+                    Camera.CFrame = CFrame.lookAt(Camera.CFrame.Position, finalLookPos)
+                    DoAutoFirePreSnapped(oldCF)
                 end
             else
-                if Settings._prefireActive then
-                    if Settings._prefireOriginalCF then
-                        Settings.SilentReturnCFrame = Settings._prefireOriginalCF
-                        Settings.SilentReturnFrames = 5
-                    end
-                    Settings._prefireActive = false
-                    Settings._prefireTarget = nil
-                    Settings._prefireFrames = 0
-                    Settings._prefireOriginalCF = nil
+                Settings.isSnapped = false
+                if UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
+                    Camera.CFrame = CFrame.lookAt(Camera.CFrame.Position, finalLookPos)
                 end
             end
-        end)
+        else
+            Settings.isSnapped = false
+        end
     end
 end)
 
--- Драггинг менюшки (UI-логика из конца твоего файла)
-local MainFrame = ScreenGui:WaitForChild("HVH_OBKAK_Menu", 2) or MainFrame
-local GlowFrame = ScreenGui:FindFirstChild("Frame") or GlowFrame
+-- ══════════════════════════════════════════════════════════════════
+--                        ОБНОВЛЕНИЕ ТАЙМИНГОВ И ИСПРАВЛЕННЫЙ РЕНДЕР
+-- ══════════════════════════════════════════════════════════════════
+RunService.RenderStepped:Connect(function()
+    local mousePos = UserInputService:GetMouseLocation()
+    circle.Position = UDim2.new(0, mousePos.X, 0, mousePos.Y)
+    
+    UpdateESP()
+
+    if Settings.AdaptiveFireEnabled and Settings.AimbotEnabled and Settings.CurrentTarget then
+        local tChar = Settings.CurrentTarget.Character
+        local tHum = tChar and tChar:FindFirstChildOfClass("Humanoid")
+        if tHum then
+            if Settings._shotCheckTarget == Settings.CurrentTarget then
+                if tHum.Health < Settings._shotCheckHealth and (tick() - Settings._shotCheckTime) < 0.4 then
+                    Settings._adaptiveStability = math.clamp(Settings._adaptiveStability - 1, Settings._adaptiveMin, Settings._adaptiveMax)
+                    Settings._shotCheckTime = 0
+                elseif (tick() - Settings._shotCheckTime) >= 0.4 then
+                    Settings._adaptiveStability = math.clamp(Settings._adaptiveStability + 1, Settings._adaptiveMin, Settings._adaptiveMax)
+                    Settings._shotCheckTime = tick()
+                    Settings._shotCheckHealth = tHum.Health
+                end
+            else
+                Settings._shotCheckTarget = Settings.CurrentTarget
+                Settings._shotCheckTime = tick()
+                Settings._shotCheckHealth = tHum.Health
+            end
+            stabilityLabel.Text = "Stability: " .. tostring(Settings._adaptiveStability) .. " frames [auto]"
+        end
+    elseif not Settings.AdaptiveFireEnabled then
+        stabilityLabel.Text = "Stability: " .. tostring(Settings.ManualStabilityFrames) .. " frames [manual]"
+    else
+        stabilityLabel.Text = "Stability: -- [idle]"
+    end
+end)
+
+-- ══════════════════════════════════════════════════════════════════
+--                        БИНД ЗАКРЫТИЯ/ОТКРЫТИЯ (INSERT)
+-- ══════════════════════════════════════════════════════════════════
+UserInputService.InputBegan:Connect(function(input, processed)
+    if input.KeyCode == Enum.KeyCode.Insert then
+        local targetState = not MainFrame.Visible
+        MainFrame.Visible = targetState
+        GlowFrame.Visible = targetState
+    end
+end)
+
+-- Драггинг менюшки
+local MainFrameUI = ScreenGui:WaitForChild("HVH_OBKAK_Menu", 2) or MainFrame
+local GlowFrameUI = ScreenGui:FindFirstChild("Frame") or GlowFrame
 local isDragging = false
 local dragStart, startPos
 
-MainFrame.InputBegan:Connect(function(input)
+MainFrameUI.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 and not Settings.IsDraggingSlider then
         isDragging = true
         dragStart  = input.Position
-        startPos   = MainFrame.Position
+        startPos   = MainFrameUI.Position
     end
 end)
+
 UserInputService.InputChanged:Connect(function(input)
     if isDragging and input.UserInputType == Enum.UserInputType.MouseMovement and dragStart then
         local delta = input.Position - dragStart
@@ -1148,22 +1342,24 @@ UserInputService.InputChanged:Connect(function(input)
             startPos.X.Scale, startPos.X.Offset + delta.X,
             startPos.Y.Scale, startPos.Y.Offset + delta.Y
         )
-        MainFrame.Position = newPos
-        GlowFrame.Position = UDim2.new(
-            newPos.X.Scale, newPos.X.Offset - 10,
-            newPos.Y.Scale, newPos.Y.Offset - 10
-        )
+        MainFrameUI.Position = newPos
+        if GlowFrameUI then
+            GlowFrameUI.Position = UDim2.new(
+                newPos.X.Scale, newPos.X.Offset - 10,
+                newPos.Y.Scale, newPos.Y.Offset - 10
+            )
+        end
     end
 end)
+
 UserInputService.InputEnded:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 then
         isDragging = false
     end
 end)
-UserInputService.InputBegan:Connect(function(input, gpe)
-    if not gpe and input.KeyCode == Enum.KeyCode.Insert then
-        local v = not MainFrame.Visible
-        MainFrame.Visible = v
-        GlowFrame.Visible = v
-    end
-end)
+
+-- По умолчанию открываем вкладку Aimbot при первом запуске
+aimBtn.TextColor3 = C.Text
+aimBtn.BackgroundColor3 = Color3.fromRGB(22, 22, 36)
+aimUL.BackgroundTransparency = 0
+aimPage.Visible = true
